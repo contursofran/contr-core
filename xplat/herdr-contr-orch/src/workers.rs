@@ -130,6 +130,37 @@ pub fn flag_value(argv: &[String], flag: &str) -> String {
     String::new()
 }
 
+/// The value of Codex's configuration key `key` in argv: the text after `key=` in the argument after `-c` or
+/// `--config`, less its quotes; or "".
+pub fn codex_config(argv: &[String], key: &str) -> String {
+    for pair in argv.windows(2) {
+        if pair[0] == "-c" || pair[0] == "--config" {
+            if let Some(v) = pair[1].strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
+                return v.trim_matches('"').to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// The model that argv starts: the value of --model, or of codex's -m; or "".
+pub fn model_of(argv: &[String]) -> String {
+    let model = flag_value(argv, "--model");
+    if model.is_empty() && argv.iter().any(|a| base(a) == "codex") {
+        return flag_value(argv, "-m");
+    }
+    model
+}
+
+/// The effort that argv starts: the value of --effort, or of codex's key model_reasoning_effort; or "".
+pub fn effort_of(argv: &[String]) -> String {
+    let effort = flag_value(argv, "--effort");
+    if effort.is_empty() {
+        return codex_config(argv, "model_reasoning_effort");
+    }
+    effort
+}
+
 /// argv less the setup wrapper and the clean wrapper, in any nesting.
 pub fn program(mut argv: &[String]) -> &[String] {
     loop {
@@ -146,6 +177,11 @@ pub fn program(mut argv: &[String]) -> &[String] {
 /// Tells whether argv runs the claude command.
 pub fn is_claude(argv: &[String]) -> bool {
     argv.first().is_some_and(|a| base(a) == "claude")
+}
+
+/// Tells whether argv runs the codex command.
+pub fn is_codex(argv: &[String]) -> bool {
+    argv.first().is_some_and(|a| base(a) == "codex")
 }
 
 /// Claude Code names itself by its version as foreground program, such as 2.1.30.
@@ -192,8 +228,8 @@ impl Worker {
             title: label(LABEL_TITLE),
             terminal_title: text(&t["title"]),
             exit_code: t["exit_code"].as_i64(),
-            model: or(label(LABEL_MODEL), flag_value(&argv, "--model")),
-            effort: or(label(LABEL_EFFORT), flag_value(&argv, "--effort")),
+            model: or(label(LABEL_MODEL), model_of(&argv)),
+            effort: or(label(LABEL_EFFORT), effort_of(&argv)),
             orchestrating: !label(LABEL_ORCHESTRATING).is_empty(),
             ..Worker::default()
         };

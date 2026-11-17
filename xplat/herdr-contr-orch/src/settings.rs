@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 use crate::config::{Config, Flow, FLOW_CHOICES, FLOW_MIN, FLOW_NUMBERS};
 use crate::owner::{Lock, Store};
-use crate::workers::flag_value;
+use crate::workers::{effort_of, model_of};
 use crate::jsonfile;
 
 /// The roles that the settings show, in their order.
@@ -35,6 +35,15 @@ fn object(data: &[u8]) -> Option<Map<String, Value>> {
 /// Where claude is in argv: the first argument with the base name "claude", at the start or after "env" and
 /// its NAME=value arguments. None when the command is not claude.
 pub fn claude_at(argv: &[String]) -> Option<usize> {
+    agent_at(argv, "claude")
+}
+
+/// Where codex is in argv, as `claude_at`. None when the command is not codex.
+pub fn codex_at(argv: &[String]) -> Option<usize> {
+    agent_at(argv, "codex")
+}
+
+fn agent_at(argv: &[String], name: &str) -> Option<usize> {
     let mut i = 0;
     if argv.first().is_some_and(|a| a == "env") {
         i = 1;
@@ -45,11 +54,11 @@ pub fn claude_at(argv: &[String]) -> Option<usize> {
             i += 1;
         }
     }
-    argv.get(i).filter(|a| a.rsplit('/').next() == Some("claude")).map(|_| i)
+    argv.get(i).filter(|a| a.rsplit('/').next() == Some(name)).map(|_| i)
 }
 
-/// Sets `flag` to `v` and keeps the other arguments. A missing flag goes after claude; a missing --effort goes
-/// after --model.
+/// Sets `flag` to `v` and keeps the other arguments. A missing flag goes after claude or codex; a missing
+/// --effort goes after --model.
 pub fn set_flag(argv: &[String], flag: &str, v: &str) -> Vec<String> {
     let mut out = argv.to_vec();
     let eq = format!("{flag}=");
@@ -63,7 +72,7 @@ pub fn set_flag(argv: &[String], flag: &str, v: &str) -> Vec<String> {
             return out;
         }
     }
-    let mut at = claude_at(&out).map_or(1, |i| i + 1);
+    let mut at = claude_at(&out).or_else(|| codex_at(&out)).map_or(1, |i| i + 1);
     if flag == "--effort" {
         for (i, a) in out.iter().enumerate() {
             if a == "--model" && i + 1 < out.len() {
@@ -75,6 +84,34 @@ pub fn set_flag(argv: &[String], flag: &str, v: &str) -> Vec<String> {
     }
     let at = at.min(out.len());
     out.splice(at..at, [flag.to_string(), v.to_string()]);
+    out
+}
+
+/// Sets the model or the effort of a codex command: `--model` (or `-m` when argv has it), and the key
+/// `model_reasoning_effort` after `-c` or `--config`. A missing effort goes after the model, else after codex.
+pub fn set_codex(argv: &[String], flag: &str, v: &str) -> Vec<String> {
+    let short = argv.iter().any(|a| a == "-m");
+    if flag == "--model" {
+        return set_flag(argv, if short { "-m" } else { "--model" }, v);
+    }
+    const KEY: &str = "model_reasoning_effort=";
+    let mut out = argv.to_vec();
+    for i in 1..out.len() {
+        if (out[i - 1] == "-c" || out[i - 1] == "--config") && out[i].starts_with(KEY) {
+            out[i] = format!("{KEY}{v}");
+            return out;
+        }
+    }
+    let mut at = codex_at(&out).map_or(1, |i| i + 1);
+    for (i, a) in out.iter().enumerate() {
+        if (a == "--model" || a == "-m") && i + 1 < out.len() {
+            at = i + 2;
+        } else if a.starts_with("--model=") {
+            at = i + 1;
+        }
+    }
+    let at = at.min(out.len());
+    out.splice(at..at, ["-c".to_string(), format!("{KEY}{v}")]);
     out
 }
 
@@ -94,7 +131,8 @@ fn valid(key: &str, v: &Value) -> bool {
 
 /// The profiles file as one JSON object: its path, `bad` (it is there and not a JSON object), the flow with the
 /// values in effect (a value that is not valid gives the default), the default and valid values of each flow
-/// key, and each role's argv in effect, if it is claude, and its model and effort.
+/// key, and each role's argv in effect, if it is claude, its agent ("claude", "codex" or ""), and its model and
+/// effort ("" for an agent that is not claude or codex).
 pub fn config_json(path: &Path) -> Result<Value, String> {
     let data = read(path)?;
     let file = data.as_deref().map(object);
@@ -119,8 +157,9 @@ pub fn config_json(path: &Path) -> Result<Value, String> {
         .map(|role| {
             let argv = argv_of(&file, role);
             let claude = claude_at(&argv).is_some();
-            let of = |flag| if claude { flag_value(&argv, flag) } else { String::new() };
-            json!({"name": role, "argv": argv, "claude": claude, "model": of("--model"), "effort": of("--effort")})
+            let agent = if claude { "claude" } else if codex_at(&argv).is_some() { "codex" } else { "" };
+            let of = |f: fn(&[String]) -> String| if agent.is_empty() { String::new() } else { f(&argv) };
+            json!({"name": role, "argv": argv, "claude": claude, "agent": agent, "model": of(model_of), "effort": of(effort_of)})
         })
         .collect();
     Ok(json!({"path": path.display().to_string(), "bad": bad, "flow": flow, "fields": fields, "roles": roles}))
@@ -163,11 +202,14 @@ fn apply(file: &mut Map<String, Value>, key: &str, value: &str) -> Result<(), St
         return Err(format!("{key}: {value:?} is not a valid value"));
     }
     let argv = argv_of(file, role);
-    // A command that is not claude is never changed.
-    if claude_at(&argv).is_none() {
+    // A command that is not claude or codex is never changed.
+    let argv = if claude_at(&argv).is_some() {
+        set_flag(&argv, flag, value)
+    } else if codex_at(&argv).is_some() {
+        set_codex(&argv, flag, value)
+    } else {
         return Ok(());
-    }
-    let argv = set_flag(&argv, flag, value);
+    };
     if !matches!(file.get("profiles"), Some(Value::Object(_))) {
         file.insert("profiles".into(), Value::Object(Map::new()));
     }
@@ -182,7 +224,7 @@ fn apply(file: &mut Map<String, Value>, key: &str, value: &str) -> Result<(), St
 }
 
 /// Sets each `key value` pair in the file under its lock, and keeps all other keys. Keys: flow.<key>,
-/// profile.<role>.model and profile.<role>.effort. A file that is not a JSON object, an unknown key or a
+/// profile.<role>.model and profile.<role>.effort (a role that is not claude or codex stays as it is). A file that is not a JSON object, an unknown key or a
 /// value that is not valid changes nothing. A missing file is made.
 pub fn set(path: &Path, pairs: &[(String, String)]) -> Result<(), String> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -234,6 +276,20 @@ mod tests {
         assert_eq!(claude_at(&v(&["env", "1A=1", "claude"])), None);
         assert_eq!(claude_at(&v(&["codex"])), None);
         assert_eq!(claude_at(&[]), None);
+    }
+
+    #[test]
+    fn set_codex_sets_the_model_and_the_effort_key() {
+        assert_eq!(codex_at(&v(&["env", "A=1", "/bin/codex"])), Some(2));
+        assert_eq!(set_codex(&v(&["codex", "--model", "a", "x"]), "--model", "b"), v(&["codex", "--model", "b", "x"]));
+        assert_eq!(set_codex(&v(&["codex", "-m", "a"]), "--model", "b"), v(&["codex", "-m", "b"]));
+        assert_eq!(set_codex(&v(&["codex", "x"]), "--model", "b"), v(&["codex", "--model", "b", "x"]));
+        assert_eq!(set_codex(&v(&["codex", "-c", "model_reasoning_effort=low", "x"]), "--effort", "high"), v(&["codex", "-c", "model_reasoning_effort=high", "x"]));
+        assert_eq!(set_codex(&v(&["codex", "--config", "model_reasoning_effort=\"low\""]), "--effort", "high"), v(&["codex", "--config", "model_reasoning_effort=high"]));
+        assert_eq!(set_codex(&v(&["codex", "-m", "a", "-c", "x=1"]), "--effort", "low"), v(&["codex", "-m", "a", "-c", "model_reasoning_effort=low", "-c", "x=1"]));
+        assert_eq!(set_codex(&v(&["codex", "x"]), "--effort", "low"), v(&["codex", "-c", "model_reasoning_effort=low", "x"]));
+        // The key as a plain word, not after -c, is not the effort.
+        assert_eq!(set_codex(&v(&["codex", "model_reasoning_effort=low"]), "--effort", "high"), v(&["codex", "-c", "model_reasoning_effort=high", "model_reasoning_effort=low"]));
     }
 
     #[test]

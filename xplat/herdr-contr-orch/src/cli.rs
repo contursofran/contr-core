@@ -66,7 +66,7 @@ pub const AGENTS_USAGE: &str = "Usage:
                                                    change fields of the profiles file under its
                                                    lock; keys: flow.<key>, profile.<role>.model,
                                                    profile.<role>.effort; a role that is not claude
-                                                   stays as it is
+                                                   or codex stays as it is
 
 Flags can come before or after the other arguments. After --, every word is
 an argument.

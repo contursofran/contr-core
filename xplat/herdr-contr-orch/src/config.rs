@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::jsonfile;
-use crate::workers::flag_value;
+use crate::workers::{effort_of, model_of};
 
 /// How to start one kind of agent: the program and its arguments. The task, when there is one, goes after them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,14 +238,15 @@ impl Config {
         Ok(cfg)
     }
 
-    /// The model that the profile starts: the value after --model in its argv, or "".
+    /// The model that the profile starts: the value after --model (or codex's -m) in its argv, or "".
     pub fn model_of(&self, profile: &str) -> String {
-        self.profiles.get(profile).map(|p| flag_value(&p.argv, "--model")).unwrap_or_default()
+        self.profiles.get(profile).map(|p| model_of(&p.argv)).unwrap_or_default()
     }
 
-    /// The effort that the profile starts: the value after --effort in its argv, or "".
+    /// The effort that the profile starts: the value after --effort (or codex's model_reasoning_effort) in its
+    /// argv, or "".
     pub fn effort_of(&self, profile: &str) -> String {
-        self.profiles.get(profile).map(|p| flag_value(&p.argv, "--effort")).unwrap_or_default()
+        self.profiles.get(profile).map(|p| effort_of(&p.argv)).unwrap_or_default()
     }
 
     /// The error for a profile that the config does not have: it names the file that was read and the profiles.

@@ -2,7 +2,7 @@
 mod common;
 
 use common::{call, Fake};
-use orch::workers::{state_text, Core, Worker};
+use orch::workers::{codex_config, effort_of, model_of, state_text, Core, Worker};
 use serde_json::{json, Value};
 
 fn worker(addr: &str, name: &str, state: &str, status: Value) -> Value {
@@ -272,4 +272,18 @@ fn the_hc_client_is_a_core() {
     assert_eq!(core.call("terminal.get", json!({"terminal": "zz"})), Err("hc: no terminal \"zz\" (not_found)".to_string()));
     let none = herdr_core::hc::HcClient::new(herdr_core::hc::HcSession::new("/nonexistent/hc.sock"), 1, 1);
     assert!(Core::call(&none, "terminal.list", json!({})).unwrap_err().starts_with("hc: socket: connect"));
+}
+
+#[test]
+fn the_model_and_the_effort_of_a_claude_or_codex_command() {
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    let claude = v(&["claude", "--model", "opus", "--effort=low", "-m", "x"]);
+    assert_eq!((model_of(&claude).as_str(), effort_of(&claude).as_str()), ("opus", "low"));
+    let codex = v(&["/bin/sh", "-c", "s", "n", "/opt/codex", "-m", "sol", "--config", "model_reasoning_effort=\"high\""]);
+    assert_eq!((model_of(&codex).as_str(), effort_of(&codex).as_str()), ("sol", "high"));
+    assert_eq!(model_of(&v(&["codex", "--model=luna", "-m", "sol"])), "luna");
+    // -m is the model only for codex. The key counts only after -c or --config.
+    assert_eq!((model_of(&v(&["pi", "-m", "x"])).as_str(), effort_of(&v(&["codex", "model_reasoning_effort=low"])).as_str()), ("", ""));
+    assert_eq!(codex_config(&v(&["codex", "-c", "a=1", "-c", "model_reasoning_effort=low"]), "model_reasoning_effort"), "low");
+    assert_eq!(codex_config(&v(&["codex", "-c"]), "a"), "");
 }
