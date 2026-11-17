@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::config::Config;
 use crate::tools::REPORT_TOOL;
-use crate::workers::{self, is_claude, Core, Worker, CLEAN_NAME, SETUP_NAME};
+use crate::workers::{self, is_claude, is_codex, Core, Worker, CLEAN_NAME, SETUP_NAME};
 
 /// Holds the main checkout of a worker's worktree while the setup command runs, so the command can copy files
 /// from it.
@@ -20,11 +20,17 @@ pub const ENV_COORDINATOR: &str = "CONTR_COORDINATOR";
 /// The folders that the clean wrapper adds after the PATH of the hc core.
 pub const ENV_PATH: &str = "CONTR_PATH";
 
+/// The names of the environment that the kit's MCP server gets in a Codex worker. Codex gives an MCP server
+/// only the names of its `env_vars`.
+pub const CODEX_ENV: [&str; 8] = ["HC_TERMINAL_ID", "HC_SOCKET", "HC_SESSION", ENV_COORDINATOR, "CONTR_HOME", "HERDR_APP_HOME", "CONTR_AGENTS_CONFIG", "CONTR_OWNER_FILE"];
+/// The key of the kit's MCP server in the configuration of a Codex worker.
+pub const CODEX_SERVER: &str = "mcp_servers.contr";
+
 /// Runs the setup command ($1) in the worktree, then starts the agent (the words after it). A failed setup ends
 /// the terminal with the setup's exit code, so the parent gets a note and the output stays readable.
 pub const SETUP_WRAPPER: &str = r#"/bin/sh -c "$1" || { s=$?; echo "contr: worktree setup failed (exit $s)" >&2; exit $s; }; shift; exec "$@""#;
 
-/// Unsets the Claude Code session variables of the hc core's environment, so Claude Code saves its transcript,
+/// For a claude or codex worker. Unsets the Claude Code session variables of the hc core's environment, so Claude Code saves its transcript,
 /// adds the folders of CONTR_PATH after PATH, then runs its arguments. terminal.run cannot unset a name.
 pub const CLEAN_SCRIPT: &str = r#"for v in $(env | sed -n -E 's/^(CLAUDECODE|CLAUDE_CODE_[A-Za-z0-9_]*)=.*/\1/p'); do unset "$v"; done; if [ -n "$CONTR_PATH" ]; then PATH="$PATH:$CONTR_PATH"; export PATH; unset CONTR_PATH; fi; exec "$@""#;
 
@@ -137,11 +143,46 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a.strip_prefix(flag).is_some_and(|r| r.is_empty() || r.starts_with('=')))
 }
 
+/// This tool for a worker of the kit: `bin/herdr-contr-orch` next to the kit, as the kit's own MCP entry; else
+/// the program that runs now; else the name alone.
+fn orch_program(kit: &str) -> String {
+    let installed = Path::new(kit).parent().map(|root| root.join("bin").join("herdr-contr-orch")).filter(|p| p.is_file());
+    installed.or_else(|| std::env::current_exe().ok()).map_or_else(|| "herdr-contr-orch".to_string(), |p| p.display().to_string())
+}
+
+/// The arguments that give a Codex worker the kit's `report` tool: the MCP server of this tool, with the
+/// environment that it reads, only the `report` tool, and no question before a report. A value is TOML; a
+/// JSON string or list of strings is the same text.
+fn codex_report(kit: &str) -> Vec<String> {
+    let text = |v: Value| v.to_string();
+    [
+        format!("{CODEX_SERVER}.command={}", text(json!(orch_program(kit)))),
+        format!("{CODEX_SERVER}.args={}", text(json!(["mcp"]))),
+        format!("{CODEX_SERVER}.env_vars={}", text(json!(CODEX_ENV))),
+        format!("{CODEX_SERVER}.enabled_tools={}", text(json!(["report"]))),
+        format!("{CODEX_SERVER}.tools.report.approval_mode={}", text(json!("approve"))),
+    ]
+    .into_iter()
+    .flat_map(|pair| ["-c".to_string(), pair])
+    .collect()
+}
+
+/// The instructions of the kit's agent: its definition less the front matter. None when the kit has none.
+fn role_text(kit: &str, agent: &str) -> Option<String> {
+    let text = fs::read_to_string(Path::new(kit).join("agents").join(format!("{agent}.md"))).ok()?;
+    let body = text.strip_prefix("---\n").and_then(|rest| rest.split_once("\n---\n")).map_or(text.as_str(), |(_, body)| body).trim();
+    (!body.is_empty()).then(|| body.to_string())
+}
+
 /// The profile's command. With a kit, a claude command gets `--allowedTools <the report tool> --plugin-dir <kit>`
 /// after the program name, unless it has `--plugin-dir` already: the allow rule lets a worker report in auto
 /// mode. `--allowedTools` takes a list, so a flag comes after it. When its agent has a definition in the kit,
-/// it also gets `--agent contr:<agent>`.
+/// it also gets `--agent contr:<agent>`. With a kit, a codex command gets the kit's `report` tool
+/// (`codex_report`) after the program name, unless it sets that MCP server already.
 pub fn agent_argv(kit: &str, agent: &str, argv: &[String]) -> Vec<String> {
+    if is_codex(argv) && !kit.is_empty() && !argv.iter().any(|a| a.starts_with(CODEX_SERVER)) {
+        return [vec![argv[0].clone()], codex_report(kit), argv[1..].to_vec()].concat();
+    }
     if !is_claude(argv) || kit.is_empty() {
         return argv.to_vec();
     }
@@ -223,10 +264,12 @@ pub fn spawn(core: &dyn Core, cfg: &Config, env: &dyn Fn(&str) -> String, mut s:
         record = Some(crate::resume::Record { name: s.name.clone(), session, profile: s.profile.clone(), role: s.role.clone(), worktree: s.worktree.clone(), issue: s.issue.clone(), project: s.project.clone(), title: s.title.clone(), parent: s.parent.clone() });
     }
     if !s.task.is_empty() {
-        argv.push(s.task.clone());
+        // Codex has no --agent, so the kit's instructions of the agent go before the task.
+        let role = if is_codex(&argv) && !kit.is_empty() { role_text(&kit, agent) } else { None };
+        argv.push(role.map_or_else(|| s.task.clone(), |r| format!("{r}\n\nYour task:\n\n{}", s.task)));
     }
     let mut vars = Map::new();
-    if is_claude(&argv) {
+    if is_claude(&argv) || is_codex(&argv) {
         argv = [words(&["/bin/sh", "-c", CLEAN_SCRIPT, CLEAN_NAME]), argv].concat();
         let path = spawn_path(env);
         if !path.is_empty() {

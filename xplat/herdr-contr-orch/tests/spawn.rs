@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use common::{call, path, Fake};
-use orch::spawn::{review_worktree, CLEAN_SCRIPT, SETUP_WRAPPER};
+use orch::spawn::{review_worktree, CLEAN_SCRIPT, CODEX_ENV, SETUP_WRAPPER};
 use orch::tools::REPORT_TOOL;
 use orch::workers::program;
 use serde_json::{json, Value};
@@ -206,9 +206,68 @@ fn a_claude_profile_loads_the_kit_and_its_agent() {
     assert!(!head(&vars, "builder").0.contains(&"--agent".to_string()));
     assert_eq!(head(&vars, "own").0, ["/opt/bin/claude", "--plugin-dir=/mine", "go"]);
     assert_eq!(head(&[("CONTR_AGENTS_CONFIG", &cfg)], "builder").0[..5], ["claude", "--allowedTools", REPORT_TOOL, "--plugin-dir", "/file/kit"]);
-    // A program that is not claude gets no kit, no clean wrapper and no path.
+    // A program that is not claude or codex gets no kit, no clean wrapper and no path.
     let (prog, len, env) = head(&vars, "pi");
     assert_eq!((prog.as_slice(), len, env), (&["pi".to_string(), "--fast".into(), "go".into()][..], 3, None));
+}
+
+#[test]
+fn a_codex_profile_gets_the_report_tool_and_the_instructions_of_its_agent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let kit = tmp.path().join("kit");
+    fs::create_dir_all(kit.join("agents")).unwrap();
+    fs::create_dir_all(tmp.path().join("bin")).unwrap();
+    let orch = tmp.path().join("bin/herdr-contr-orch");
+    fs::write(&orch, "").unwrap();
+    fs::write(kit.join("agents/builder.md"), "---\nname: builder\nmodel: sonnet\n---\nYou are the builder.\nReport.\n").unwrap();
+    fs::write(kit.join("agents/planner.md"), "No front matter.\n").unwrap();
+    fs::write(kit.join("agents/reviewer.md"), "---\nname: reviewer\n---\n\n").unwrap();
+    let cfg = config(
+        tmp.path(),
+        json!({"profiles": {
+            "builder": {"argv": ["/opt/codex", "-m", "sol"]},
+            "sol": {"argv": ["codex"], "agent": "planner"},
+            "reviewer": {"argv": ["codex"]},
+            "own": {"argv": ["codex", "-c", "mcp_servers.contr.command=\"mine\""], "agent": "none"}}}),
+    );
+    let run = |vars: &[(&str, &str)], profile: &str, task: &[&str]| {
+        let core = run_reply("w");
+        let r = call(&[&["agents", "spawn", "--name", "w", "--profile", profile, "--any-profile"], task].concat(), vars, &core);
+        assert_eq!(r.code, 0, "{}", r.err);
+        let params = ran(&core).1;
+        (argv(&params), params.get("env").cloned())
+    };
+    let vars = [("CONTR_AGENTS_CONFIG", cfg.as_str()), ("CONTR_KIT", path(&kit)), ("PATH", "/bin")];
+    let (full, env) = run(&vars, "builder", &["go"]);
+    // The clean wrapper and the path, as for claude; no session id.
+    assert_eq!((full[2].as_str(), env.unwrap()["CONTR_PATH"].as_str().unwrap().starts_with("/bin")), (CLEAN_SCRIPT, true));
+    let prog = program(&full);
+    let server = [
+        format!("mcp_servers.contr.command=\"{}\"", path(&orch)),
+        "mcp_servers.contr.args=[\"mcp\"]".to_string(),
+        format!("mcp_servers.contr.env_vars={}", json!(CODEX_ENV)),
+        "mcp_servers.contr.enabled_tools=[\"report\"]".to_string(),
+        "mcp_servers.contr.tools.report.approval_mode=\"approve\"".to_string(),
+    ];
+    let mut want = vec!["/opt/codex".to_string()];
+    for pair in &server {
+        want.extend(["-c".to_string(), pair.clone()]);
+    }
+    want.extend(["-m", "sol", "You are the builder.\nReport.\n\nYour task:\n\ngo"].map(String::from));
+    assert_eq!(prog, want);
+    assert!(CODEX_ENV.contains(&"HC_TERMINAL_ID") && CODEX_ENV.contains(&"CONTR_COORDINATOR"));
+    // A definition with no front matter is the instructions whole. No task: no instructions.
+    assert_eq!(program(&run(&vars, "sol", &["go"]).0).last().unwrap(), "No front matter.\n\nYour task:\n\ngo");
+    assert_eq!(program(&run(&vars, "sol", &[]).0).last().unwrap(), server[4].as_str());
+    // A definition with no text, or no definition, gives the task alone. An MCP server of the profile stays.
+    assert_eq!(program(&run(&vars, "reviewer", &["go"]).0).last().unwrap(), "go");
+    assert_eq!(program(&run(&vars, "own", &["go"]).0), ["codex", "-c", "mcp_servers.contr.command=\"mine\"", "go"]);
+    // With no kit, the command and the task are as the profile has them. Without the installed tool, the
+    // server's command is the program that runs.
+    assert_eq!(program(&run(&[("CONTR_AGENTS_CONFIG", &cfg)], "builder", &["go"]).0), ["/opt/codex", "-m", "sol", "go"]);
+    fs::remove_file(&orch).unwrap();
+    let exe = program(&run(&vars, "builder", &["go"]).0)[2].clone();
+    assert!(exe.starts_with("mcp_servers.contr.command=\"/") && !exe.contains(path(&orch)), "{exe}");
 }
 
 #[test]

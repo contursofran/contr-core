@@ -39,7 +39,7 @@ fn config_of_a_missing_file_gives_the_defaults_and_the_valid_values() {
     assert_eq!(v["fields"]["debugger_after"], json!({"default": 2, "min": 1}));
     let names: Vec<&str> = v["roles"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["orchestrator", "planner", "builder", "reviewer", "debugger"]);
-    assert_eq!(v["roles"][0], json!({"name": "orchestrator", "claude": true, "model": "opus", "effort": "medium",
+    assert_eq!(v["roles"][0], json!({"name": "orchestrator", "claude": true, "agent": "claude", "model": "opus", "effort": "medium",
         "argv": ["claude", "--model", "opus", "--effort", "medium", "--permission-mode", "auto"]}));
     assert!(!cfg.exists());
 }
@@ -54,7 +54,8 @@ fn config_uses_the_file_and_a_value_that_is_not_valid_gives_the_default() {
     assert_eq!(v["flow"], json!({"plan": "never", "review": "code", "debugger_after": 3, "workers": 4, "merge": "ask"}));
     let role = |i: usize| v["roles"][i].clone();
     assert_eq!((role(2)["claude"].clone(), role(2)["model"].clone(), role(2)["effort"].clone()), (json!(true), json!("haiku"), json!("")));
-    assert_eq!((role(3)["claude"].clone(), role(3)["model"].clone()), (json!(false), json!("")));
+    assert_eq!((role(2)["agent"].clone(), role(3)["agent"].clone()), (json!("claude"), json!("codex")));
+    assert_eq!((role(3)["claude"].clone(), role(3)["model"].clone(), role(3)["effort"].clone()), (json!(false), json!("x"), json!("")));
     assert_eq!(role(3)["argv"], json!(["codex", "--model", "x"]));
     assert_eq!(role(1)["model"], "opus", "an empty argv gives the built-in one");
 }
@@ -113,14 +114,26 @@ fn set_keeps_the_other_keys() {
 }
 
 #[test]
-fn set_leaves_a_role_that_is_not_claude() {
+fn set_leaves_a_role_that_is_not_claude_or_codex() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("agents.json");
-    let text = r#"{"profiles":{"reviewer":{"argv":["codex","--model","x"]}}}"#;
+    let text = r#"{"profiles":{"reviewer":{"argv":["pi","--model","x"]}}}"#;
     fs::write(&cfg, text).unwrap();
     let r = set(&cfg, &["profile.reviewer.model", "opus", "profile.reviewer.effort", "low"]);
     assert_eq!((r.code, r.err.as_str()), (0, ""));
     assert_eq!(file(&cfg), serde_json::from_str::<Value>(text).unwrap());
+}
+
+#[test]
+fn set_changes_the_model_and_the_effort_of_a_codex_role() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("agents.json");
+    fs::write(&cfg, r#"{"profiles":{"builder":{"argv":["/bin/codex","--model","a","-c","model_reasoning_effort=medium","--approve-for-me"]}}}"#).unwrap();
+    let r = set(&cfg, &["profile.builder.model", "b", "profile.builder.effort", "high"]);
+    assert_eq!((r.code, r.err.as_str()), (0, ""));
+    assert_eq!(file(&cfg)["profiles"]["builder"]["argv"], json!(["/bin/codex", "--model", "b", "-c", "model_reasoning_effort=high", "--approve-for-me"]));
+    let role = config(&cfg)["roles"][2].clone();
+    assert_eq!((role["agent"].clone(), role["model"].clone(), role["effort"].clone()), (json!("codex"), json!("b"), json!("high")));
 }
 
 #[test]
