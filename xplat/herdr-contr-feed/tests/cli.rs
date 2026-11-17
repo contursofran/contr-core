@@ -344,5 +344,6 @@ fn update_reads_the_release_file_for_a_neutral_root() {
     let i = run(&["update", "install"]);
     assert_eq!((i[1]["code"].as_str(), i.last().unwrap()["ok"].as_bool()), (Some("http"), Some(false)), "{i:?}");
     let urls = std::fs::read_to_string(t.path().join("urls")).unwrap();
+    assert!(urls.starts_with("https://example.com/release.json\n"), "HERDR_CONTR_RELEASE_URL: {urls}");
     assert!(urls.ends_with("https://github.com/o/r/releases/download/build-2026-11-16-abc1234/herdr-contr-build-2026-11-16-abc1234.zip\n"), "{urls}");
 }

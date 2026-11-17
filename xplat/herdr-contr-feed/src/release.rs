@@ -679,5 +679,7 @@ printf '\n%s' "$(cat "$d/$k.code" 2>/dev/null || echo 404)""#,
         std::fs::write(t.path().join("install.json"), r#"{"build":"abc1234 2026-11-16","release":"0.1.7"}"#).unwrap();
         let l = check(&fake(None, None), t.path(), 1000, false).unwrap();
         assert_eq!((l["releases"].clone(), l["newest_version"].clone(), l["newer"].as_bool()), (json!([]), Value::Null, Some(false)));
+        std::fs::write(t.path().join("update.json"), json!({"checked_at": 1000, "tag": TAG, "url": "u"}).to_string()).unwrap();
+        assert_eq!(check(&fake(None, None), t.path(), 1000, false).unwrap()["releases"], json!([]), "an update.json made before the releases");
     }
 }
