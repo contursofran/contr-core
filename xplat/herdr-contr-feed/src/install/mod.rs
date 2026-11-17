@@ -24,7 +24,8 @@ Usage: herdr-contr-feed install [--backend] [--home <herdr-app home>] [--helper 
                                 [--orch <herdr-contr-orch>] [--remote <folder>] [--dry-run]
  - It writes into the core's root only: kit/ (a file there that this version does not have is removed),
    .claude-plugin/marketplace.json, bin/herdr-contr-feed (with --helper), bin/herdr-contr-orch (with --orch),
-   remote/ (with --remote), and \"build\" and \"release\" (the version, null for a build from source) in install.json (the record of an install of the mod stays).
+   remote/ (with --remote), and \"build\" and \"release\" (the version, null for a build from source) in
+   install.json (the record of an install of the mod stays).
  - The root is <home>/herdr-contr with --home, else $CONTR_HOME, else $HERDR_APP_HOME/herdr-contr, else
    the root this helper is installed in, else ~/.config/contr-core when it exists, else ~/.config/contr-backend when it exists, else
    ~/.config/herdr-app/herdr-contr when it exists, else ~/.config/contr-core.
