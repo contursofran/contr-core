@@ -55,26 +55,6 @@ pub(super) fn read_remote(dir: &Path) -> Result<(Vec<Remote>, Vec<u8>), String> 
     Ok((out, sums))
 }
 
-#[cfg(feature = "herdr-mod")]
-/// The files of the orchestration tool that the contr app kept in the user config folder (macOS:
-/// ~/Library/Application Support/contr; else $XDG_CONFIG_HOME/contr or ~/.config/contr) and that have no copy
-/// in the Herdr home yet, as (the new place, the old file). The tool reads them in <home>/herdr-contr now (#160).
-pub(super) fn old_orch_files(home: &Path, env: &dyn Fn(&str) -> Option<String>, macos: bool) -> Vec<(PathBuf, PathBuf)> {
-    let old = if macos {
-        env("HOME").map(|h| Path::new(&h).join("Library/Application Support/contr"))
-    } else {
-        env("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| env("HOME").map(|h| Path::new(&h).join(".config"))).map(|d| d.join("contr"))
-    };
-    let Some(old) = old else { return Vec::new() };
-    let places = Places::new(home);
-    [places.agents(), places.owner()]
-        .into_iter()
-        .filter_map(|to| Some((old.join(to.file_name()?), to)))
-        .filter(|(from, to)| from.is_file() && !to.exists())
-        .map(|(from, to)| (to, from))
-        .collect()
-}
-
 /// What the install puts in <home>/herdr-contr: the programs given, the helpers for other machines, the files
 /// copied from the contr app (`moved`) and the kit files this version does not have (`kit_old`).
 pub(super) struct Backend<'a> {

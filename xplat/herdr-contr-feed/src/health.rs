@@ -1,25 +1,11 @@
 //! `herdr-contr-feed health`: checks the install in one Herdr home (#217). One `check` line for each check:
 //! `{id, state: ok|warn|fail, message, fix}`. It reads files and runs `herdr-contr-orch --version`; it writes nothing.
-//! The mod gives what only Herdr knows: the layout in use, Herdr's version and hc's version.
-//! The checks `orch` and `kit` read the backend root. Without the feature herdr-mod, they are the only checks.
+//! The checks `orch` and `kit` read the backend root; they are the only checks.
 
 use herdr_core::places::Places;
 use serde_json::{json, Value};
-#[cfg(any(feature = "herdr-mod", test))]
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[cfg(feature = "herdr-mod")]
-use crate::install::MODS;
-
-/// The oldest Herdr that this mod works with.
-#[cfg(feature = "herdr-mod")]
-pub const MIN_HERDR: &str = "0.1.16";
-
-/// The layouts that the install puts in the Herdr home.
-#[cfg(feature = "herdr-mod")]
-pub const LAYOUTS: [&str; 2] = ["herdr-contr", "herdr-contr-own"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
@@ -40,22 +26,10 @@ impl Check {
 
 /// What the checks read. Tests give fakes.
 pub struct Inputs<'a> {
-    /// The Herdr home, for the mod's checks.
-    #[cfg(feature = "herdr-mod")]
-    pub home: PathBuf,
     /// The backend root (`config::dir`), for the checks `orch` and `kit`.
     pub root: PathBuf,
     /// This helper's build stamp.
     pub build: String,
-    /// The layout in use, from the mod.
-    #[cfg(feature = "herdr-mod")]
-    pub layout: Option<String>,
-    #[cfg(feature = "herdr-mod")]
-    pub herdr: Option<String>,
-    #[cfg(feature = "herdr-mod")]
-    pub hc_version: Option<String>,
-    #[cfg(feature = "herdr-mod")]
-    pub hc_up: bool,
     /// The Claude Code folder (`~/.claude`, or CLAUDE_CONFIG_DIR).
     pub claude: Option<PathBuf>,
     /// Runs `<orch> --version`: its stdout, or why it did not run.
@@ -64,132 +38,10 @@ pub struct Inputs<'a> {
 
 const REINSTALL: &str = "Install again: unzip the latest release and run ./install.sh.";
 
-#[cfg(feature = "herdr-mod")]
-pub fn checks(i: &Inputs) -> Vec<Check> {
-    let p = Places::at(i.root.clone());
-    let record: Option<Value> = fs::read(Places::new(&i.home).install_record()).ok().and_then(|b| serde_json::from_slice(&b).ok());
-    vec![mods(i, &record), layout(i, &record), collisions(i), orch(i, &p), hc(i), kit(i, &p), herdr(i)]
-}
-
-/// Without the mod: only the backend's checks.
-#[cfg(not(feature = "herdr-mod"))]
+/// The backend's checks.
 pub fn checks(i: &Inputs) -> Vec<Check> {
     let p = Places::at(i.root.clone());
     vec![orch(i, &p), kit(i, &p)]
-}
-
-#[cfg(any(feature = "herdr-mod", test))]
-fn sha_file(p: &Path) -> Option<String> {
-    fs::read(p).ok().map(|b| format!("{:x}", Sha256::digest(&b)))
-}
-
-#[cfg(feature = "herdr-mod")]
-/// The files of the record whose path starts with `prefix`, and those that are missing or changed.
-fn differ(home: &Path, record: &Value, prefix: &str) -> (usize, Vec<String>, Vec<String>) {
-    let (mut n, mut missing, mut changed) = (0, vec![], vec![]);
-    for (rel, want) in record.get("files").and_then(|f| f.as_object()).into_iter().flatten() {
-        if !rel.starts_with(prefix) {
-            continue;
-        }
-        n += 1;
-        match sha_file(&home.join(rel)) {
-            None => missing.push(rel.clone()),
-            Some(h) if Some(h.as_str()) != want.as_str() => changed.push(rel.clone()),
-            _ => {}
-        }
-    }
-    (n, missing, changed)
-}
-
-#[cfg(feature = "herdr-mod")]
-fn mods(i: &Inputs, record: &Option<Value>) -> Check {
-    let Some(r) = record else {
-        return Check::new("mods", "fail", "There is no herdr-contr/install.json: the mod was not installed with the helper.", REINSTALL);
-    };
-    let (n, missing, changed) = differ(&i.home, r, "mods/");
-    let built = r.get("build").and_then(|b| b.as_str()).unwrap_or("unknown");
-    if n == 0 || !missing.is_empty() {
-        let names = if n == 0 { MODS.join(", ") } else { missing.join(", ") };
-        return Check::new("mods", "fail", format!("Files of our mods are missing: {names}."), REINSTALL);
-    }
-    if built != i.build {
-        return Check::new("mods", "fail", format!("The mods are from build {built}, the helper is from build {}.", i.build), REINSTALL);
-    }
-    if !changed.is_empty() {
-        return Check::new("mods", "warn", format!("Files of our mods were changed after the install: {}.", changed.join(", ")), REINSTALL);
-    }
-    Check::new("mods", "ok", format!("{} are installed, build {built}.", MODS.join(", ")), "")
-}
-
-#[cfg(feature = "herdr-mod")]
-fn layout(i: &Inputs, record: &Option<Value>) -> Check {
-    let name = i.layout.as_deref().unwrap_or("");
-    if !LAYOUTS.contains(&name) {
-        let shown = if name.is_empty() { "unknown".to_string() } else { name.to_string() };
-        return Check::new("layout", "warn", format!("The layout in use is {shown}, not herdr-contr."), "Switch the layout to herdr-contr (Herdr's layout menu).");
-    }
-    if let Some(r) = record {
-        let (_, missing, changed) = differ(&i.home, r, &format!("layouts/{name}.json"));
-        if !missing.is_empty() || !changed.is_empty() {
-            return Check::new("layout", "warn", format!("The layout {name} was changed after the install: another mod can dock into it."), REINSTALL);
-        }
-    }
-    Check::new("layout", "ok", format!("The layout in use is {name}."), "")
-}
-
-#[cfg(feature = "herdr-mod")]
-/// Another mod with one of our names or titles, and a mod in our layouts that is not there.
-fn collisions(i: &Inputs) -> Check {
-    let mods_dir = i.home.join("mods");
-    let title = |dir: &Path| -> Option<String> {
-        let v: Value = serde_json::from_slice(&fs::read(dir.join("mod.json")).ok()?).ok()?;
-        v.get("title").and_then(|t| t.as_str()).map(String::from)
-    };
-    let ours: Vec<String> = MODS.iter().filter_map(|m| title(&mods_dir.join(m))).collect();
-    let mut bad = vec![];
-    let mut names: Vec<String> = fs::read_dir(&mods_dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    names.sort();
-    for name in &names {
-        if MODS.contains(&name.as_str()) || crate::install::RETIRED.contains(&name.as_str()) {
-            continue;
-        }
-        let t = title(&mods_dir.join(name));
-        if name.starts_with("herdr-contr") || t.as_ref().is_some_and(|t| ours.contains(t)) {
-            bad.push(format!("mods/{name}"));
-        }
-    }
-    for l in LAYOUTS {
-        let Ok(b) = fs::read(i.home.join("layouts").join(format!("{l}.json"))) else { continue };
-        let Ok(v) = serde_json::from_slice::<Value>(&b) else { continue };
-        let mut used = vec![];
-        mods_in(&v, &mut used);
-        for m in used {
-            if !names.contains(&m) && !bad.contains(&format!("layouts/{l}.json: {m}")) {
-                bad.push(format!("layouts/{l}.json: {m}"));
-            }
-        }
-    }
-    if bad.is_empty() {
-        Check::new("collisions", "ok", "No other mod uses our names, and each mod in our layouts is there.", "")
-    } else {
-        Check::new("collisions", "fail", format!("Other mods collide with ours, or our layouts name a mod that is not there: {}.", bad.join(", ")),
-            "Remove or rename the other mod (for example an older contr or Flockbook mod), then install again.")
-    }
-}
-
-#[cfg(feature = "herdr-mod")]
-fn mods_in(v: &Value, out: &mut Vec<String>) {
-    match v {
-        Value::Object(o) => {
-            if let Some(Value::String(m)) = o.get("mod") {
-                out.push(m.clone());
-            }
-            o.values().for_each(|x| mods_in(x, out));
-        }
-        Value::Array(a) => a.iter().for_each(|x| mods_in(x, out)),
-        _ => {}
-    }
 }
 
 fn orch(i: &Inputs, p: &Places) -> Check {
@@ -211,16 +63,6 @@ fn orch(i: &Inputs, p: &Places) -> Check {
     }
 }
 
-#[cfg(feature = "herdr-mod")]
-fn hc(i: &Inputs) -> Check {
-    let v = i.hc_version.as_deref().unwrap_or("unknown");
-    if i.hc_up {
-        Check::new("hc", "ok", format!("hc is reachable, version {v}."), "")
-    } else {
-        Check::new("hc", "fail", "hc (herdr-core) is not reachable.", "Start Herdr again; it starts hc.")
-    }
-}
-
 fn kit(i: &Inputs, p: &Places) -> Check {
     if !p.kit().join(".claude-plugin").join("plugin.json").is_file() || !p.marketplace().is_file() {
         return Check::new("kit", "fail", "The kit is not in herdr-contr/kit.", REINSTALL);
@@ -233,22 +75,6 @@ fn kit(i: &Inputs, p: &Places) -> Check {
         None => Check::new("kit", "warn", "The Claude Code plugin contr is not added.", add),
         Some(x) if Path::new(x) != p.folder() => Check::new("kit", "fail", format!("The Claude Code plugin contr reads {x}, not the installed kit."), add),
         Some(_) => Check::new("kit", "ok", "The Claude Code plugin contr reads the installed kit.", ""),
-    }
-}
-
-#[cfg(feature = "herdr-mod")]
-fn parse(v: &str) -> Vec<u64> {
-    v.trim().trim_start_matches('v').split(['.', '-', ' ']).map_while(|x| x.parse().ok()).collect()
-}
-
-#[cfg(feature = "herdr-mod")]
-fn herdr(i: &Inputs) -> Check {
-    match i.herdr.as_deref() {
-        None => Check::new("herdr", "warn", "Herdr's version is not known.", ""),
-        Some(v) if parse(v) < parse(MIN_HERDR) => {
-            Check::new("herdr", "fail", format!("Herdr is {v}; herdr-contr needs {MIN_HERDR} or later."), "Update Herdr.")
-        }
-        Some(v) => Check::new("herdr", "ok", format!("Herdr is {v}."), ""),
     }
 }
 
@@ -282,18 +108,7 @@ mod tests {
     fn good() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
         let h = d.path();
-        let mut files = serde_json::Map::new();
-        for (rel, body) in [
-            ("mods/herdr-contr/mod.json", r#"{"title":"herdr-contr"}"#),
-            ("mods/herdr-contr-spaces/mod.json", r#"{"title":"Spaces C"}"#),
-            ("mods/herdr-contr-tabs/mod.json", r#"{"title":"Tabs C"}"#),
-            ("layouts/herdr-contr.json", r#"{"children":[{"content":{"mod":"herdr-contr"}},{"content":{"mod":"pane"}}]}"#),
-        ] {
-            put(h, rel, body);
-            files.insert(rel.into(), json!(sha_file(&h.join(rel)).unwrap()));
-        }
-        put(h, "mods/pane/mod.json", r#"{"title":"Pane"}"#);
-        put(h, "herdr-contr/install.json", &json!({"build": B, "files": files}).to_string());
+        put(h, "herdr-contr/install.json", &json!({"build": B}).to_string());
         put(h, "herdr-contr/bin/herdr-contr-orch", "");
         put(h, "herdr-contr/kit/.claude-plugin/plugin.json", "{}");
         put(h, "herdr-contr/.claude-plugin/marketplace.json", "{}");
@@ -308,18 +123,8 @@ mod tests {
 
     fn inputs<'a>(h: &Path, orch: &'a dyn Fn(&Path) -> Result<String, String>) -> Inputs<'a> {
         Inputs {
-            #[cfg(feature = "herdr-mod")]
-            home: h.into(),
             root: h.join("herdr-contr"),
             build: B.into(),
-            #[cfg(feature = "herdr-mod")]
-            layout: Some("herdr-contr".into()),
-            #[cfg(feature = "herdr-mod")]
-            herdr: Some("0.1.16".into()),
-            #[cfg(feature = "herdr-mod")]
-            hc_version: Some("0.5.0".into()),
-            #[cfg(feature = "herdr-mod")]
-            hc_up: true,
             claude: Some(h.join("claude")),
             orch_version: orch,
         }
@@ -331,66 +136,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn a_good_install_is_all_ok() {
-        let d = good();
-        let c = checks(&inputs(d.path(), &ok_orch));
-        assert_eq!(c.len(), 7);
-        for x in &c {
-            assert_eq!(x.state, "ok", "{x:?}");
-        }
-        assert_eq!(c[0].line()["type"], "check");
-    }
-
-    #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn mods_missing_changed_or_from_another_build() {
-        let d = good();
-        let h = d.path();
-        assert_eq!(state(&checks(&inputs(h, &ok_orch)), "mods").0, "ok");
-        put(h, "mods/herdr-contr-tabs/mod.json", "{}");
-        assert_eq!(state(&checks(&inputs(h, &ok_orch)), "mods").0, "warn");
-        let mut i = inputs(h, &ok_orch);
-        i.build = "other".into();
-        assert!(state(&checks(&i), "mods").1.contains("build abc1234"));
-        fs::remove_file(h.join("mods/herdr-contr-tabs/mod.json")).unwrap();
-        assert_eq!(state(&checks(&inputs(h, &ok_orch)), "mods").0, "fail");
-        fs::remove_file(h.join("herdr-contr/install.json")).unwrap();
-        assert!(state(&checks(&inputs(h, &ok_orch)), "mods").1.contains("install.json"));
-    }
-
-    #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn another_layout_or_a_changed_one_warns() {
-        let d = good();
-        let mut i = inputs(d.path(), &ok_orch);
-        i.layout = Some("main".into());
-        assert_eq!(state(&checks(&i), "layout"), ("warn", "The layout in use is main, not herdr-contr.".into()));
-        put(d.path(), "layouts/herdr-contr.json", r#"{"mod":"herdr-contr"}"#);
-        assert!(state(&checks(&inputs(d.path(), &ok_orch)), "layout").1.contains("changed"));
-    }
-
-    #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn a_mod_with_our_name_or_title_collides() {
-        let d = good();
-        put(d.path(), "mods/flock/mod.json", r#"{"title":"herdr-contr"}"#);
-        put(d.path(), "mods/herdr-contr-x/mod.json", "{}");
-        let (s, m) = state(&checks(&inputs(d.path(), &ok_orch)), "collisions");
-        assert_eq!(s, "fail");
-        assert!(m.contains("mods/flock") && m.contains("mods/herdr-contr-x"), "{m}");
-    }
-
-    #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn our_layout_naming_a_missing_mod_fails() {
-        let d = good();
-        fs::remove_dir_all(d.path().join("mods/pane")).unwrap();
-        assert!(state(&checks(&inputs(d.path(), &ok_orch)), "collisions").1.contains("layouts/herdr-contr.json: pane"));
-    }
-
-    #[test]
-    #[cfg(not(feature = "herdr-mod"))]
     fn backend_health_has_only_orch_and_kit() {
         let d = good();
         let c = checks(&inputs(d.path(), &ok_orch));
@@ -427,15 +172,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn hc_down_fails() {
-        let d = good();
-        let mut i = inputs(d.path(), &ok_orch);
-        i.hc_up = false;
-        assert_eq!(state(&checks(&i), "hc").0, "fail");
-    }
-
-    #[test]
     fn kit_plugin_elsewhere_absent_or_kit_missing() {
         let d = good();
         let h = d.path();
@@ -445,18 +181,5 @@ mod tests {
         assert_eq!(state(&checks(&inputs(h, &ok_orch)), "kit").0, "warn");
         fs::remove_dir_all(h.join("herdr-contr/kit")).unwrap();
         assert_eq!(state(&checks(&inputs(h, &ok_orch)), "kit").0, "fail");
-    }
-
-    #[test]
-    #[cfg(feature = "herdr-mod")]
-    fn herdr_too_old_fails() {
-        let d = good();
-        let mut i = inputs(d.path(), &ok_orch);
-        i.herdr = Some("0.1.9".into());
-        assert_eq!(state(&checks(&i), "herdr").0, "fail");
-        i.herdr = Some("0.2.0".into());
-        assert_eq!(state(&checks(&i), "herdr").0, "ok");
-        i.herdr = None;
-        assert_eq!(state(&checks(&i), "herdr").0, "warn");
     }
 }
