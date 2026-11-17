@@ -303,3 +303,46 @@ fn statusline_switch_and_wrapper_end_to_end() {
     let v = run("/nonexistent.sock", &["statusline", "toggle", "--settings", sp]);
     assert_eq!(v[1]["code"], "usage");
 }
+
+/// `update check` and `update install` with no --home: the root is CONTR_HOME, and the releases come from
+/// release.json with curl (a fake one, HERDR_CONTR_CURL) at HERDR_CONTR_RELEASE_URL.
+#[test]
+fn update_reads_the_release_file_for_a_neutral_root() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("contr-core");
+    std::fs::create_dir(&root).unwrap();
+    let file = serde_json::json!({"schema": 1, "version": "0.1.7", "tag": "build-2026-11-16-abc1234", "assets": ["herdr-contr-build-2026-11-16-abc1234.zip"],
+        "sha256": {"herdr-contr-build-2026-11-16-abc1234.zip": "ab12"}, "releases": [{"version": "0.1.7", "tag": "build-2026-11-16-abc1234", "date": "2026-11-16", "changes": []}]});
+    std::fs::write(t.path().join("release.json"), file.to_string()).unwrap();
+    // It serves release.json; the zip gets a 500.
+    let curl = t.path().join("curl");
+    let body = format!(
+        "#!/bin/sh\nfor a; do u=\"$a\"; done\necho \"$u\" >> '{0}/urls'\ncase \"$u\" in *.zip) printf '\\n500';; *) cat '{0}/release.json'; printf '\\n200';; esac\n",
+        t.path().display()
+    );
+    std::fs::write(&curl, body).unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |args: &[&str]| -> Vec<Value> {
+        let out = Command::new(env!("CARGO_BIN_EXE_herdr-contr-feed"))
+            .args(args)
+            .env_clear()
+            .env("HOME", t.path())
+            .env("PATH", "/usr/bin:/bin")
+            .env("CONTR_HOME", &root)
+            .env("HERDR_CONTR_REPO", "o/r")
+            .env("HERDR_CONTR_CURL", &curl)
+            .env("HERDR_CONTR_RELEASE_URL", "https://example.com/release.json")
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    };
+    let c = run(&["update", "check"]);
+    assert_eq!(c[1]["type"], "update", "{c:?}");
+    assert_eq!((c[1]["root"].as_str(), c[1]["newest_version"].as_str()), (root.to_str(), Some("0.1.7")));
+    assert!(root.join("update.json").is_file());
+    let i = run(&["update", "install"]);
+    assert_eq!((i[1]["code"].as_str(), i.last().unwrap()["ok"].as_bool()), (Some("http"), Some(false)), "{i:?}");
+    let urls = std::fs::read_to_string(t.path().join("urls")).unwrap();
+    assert!(urls.ends_with("https://github.com/o/r/releases/download/build-2026-11-16-abc1234/herdr-contr-build-2026-11-16-abc1234.zip\n"), "{urls}");
+}

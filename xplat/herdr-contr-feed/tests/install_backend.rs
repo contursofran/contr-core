@@ -99,6 +99,14 @@ impl Sandbox {
     }
 }
 
+/// This helper's release version, as `version` says it (null for a build from source).
+fn own_release() -> Value {
+    let o = Command::new(env!("CARGO_BIN_EXE_herdr-contr-feed")).arg("version").output().unwrap();
+    let text = String::from_utf8_lossy(&o.stdout).into_owned();
+    let line = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["type"] == "version").unwrap();
+    line["release"].clone()
+}
+
 /// The files and folders under `dir`, as paths relative to it.
 fn all_paths(dir: &Path, base: &Path, out: &mut Vec<String>) {
     for e in fs::read_dir(dir).unwrap().flatten() {
@@ -129,7 +137,7 @@ fn backend_install_writes_no_mod_file() {
     }
     assert!(s.calls().is_empty(), "herdr-app check ran: {:?}", s.calls());
     let record: Value = serde_json::from_str(&read(r_dir.join("install.json"))).unwrap();
-    assert_eq!(record, json!({ "build": env!("HERDR_CONTR_BUILD") }));
+    assert_eq!(record, json!({ "build": env!("HERDR_CONTR_BUILD"), "release": own_release() }));
 }
 
 #[test]
@@ -149,13 +157,14 @@ fn backend_install_keeps_the_mod_record() {
     // The record of an install of the mod, by an older build: the backend install gives it this build.
     let path = s.app.join("herdr-contr/install.json");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let before = json!({ "build": "old 2026-01-01", "files": { "mods/herdr-contr/mod.json": sha(b"{}") } });
+    let before = json!({ "build": "old 2026-01-01", "release": "0.0.1", "files": { "mods/herdr-contr/mod.json": sha(b"{}") } });
     fs::write(&path, before.to_string()).unwrap();
     let r = s.run_backend(&["--home", s.app_s()], &[]);
     assert_eq!(r.status.code(), Some(0), "{}", both(&r));
     let after: Value = serde_json::from_str(&read(&path)).unwrap();
     assert_eq!(after["files"], before["files"]);
     assert_eq!(after["build"], env!("HERDR_CONTR_BUILD"));
+    assert_eq!(after["release"], own_release(), "the version is this helper's");
 }
 
 #[test]
