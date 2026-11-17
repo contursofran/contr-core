@@ -12,7 +12,7 @@ fn show(v: (u64, u64, u64)) -> String {
 }
 
 /// The release version baked in at build time only (no test stand-in): `version` reports it, so the
-/// release's package job can check that every helper it ships says the tag's version.
+/// release's "Check the stamp" steps can check that every helper it ships says the release's version (0.1.<run>).
 pub fn release() -> Option<String> {
     option_env!("HERDR_CONTR_VERSION").and_then(version).map(show)
 }
