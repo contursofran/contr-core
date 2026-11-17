@@ -133,11 +133,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      # The layout that herdr-app/install.sh reads: bin/ (macOS), remote/<target>/ and remote/SHA256SUMS.
+      # The layout that install.sh reads: bin/ (macOS), remote/<target>/ and remote/SHA256SUMS.
       - name: Make the zip
         run: |
           d="herdr-contr-$TAG"; mkdir -p "$d/bin"
-          cp herdr-app/install.sh "$d/"
+          cp install.sh "$d/"
           cp artifacts/macos/herdr-contr-feed artifacts/macos/herdr-contr-orch "$d/bin/"
           for t in universal-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do mkdir -p "$d/remote/$t"; done
           cp artifacts/macos/herdr-contr-feed "$d/remote/universal-apple-darwin/"

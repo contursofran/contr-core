@@ -1,27 +1,13 @@
-herdr-contr
+contr-core
 
 This repository started as a copy of Flockbook
 (https://github.com/minchenlee/flockbook) at commit
-0cadf31cdaa3ce000ea3748648461e0f8b265450. The first commit of this
-repository is that tree with no changes.
+0cadf31cdaa3ce000ea3748648461e0f8b265450. This repository holds contr's core, which came from herdr-contr with its history; herdr-contr started as a copy of Flockbook at that commit.
 
 Flockbook is licensed under the MIT License, Copyright (c) 2026 Minchen Lee.
 See LICENSE.
 
-The mods in herdr-app/mods/herdr-contr-spaces and herdr-app/mods/herdr-contr-tabs
-are adapted from the spaces and tabs mods that ship with the Herdr app, licensed
-under the Apache License, Version 2.0 (see LICENSE-APACHE and
-THIRD_PARTY_NOTICES.md). The agent rows of herdr-contr-spaces come
-from the agents mod of the Herdr app, under the same license. The changes: the
-working mark is a braille loader, and the space icon is the project's favicon.
-Each changed file says so at its top.
-
 The software that the code uses is listed in THIRD_PARTY_NOTICES.md.
-
-The pull request and issue icons in herdr-app/mods/herdr-contr/icons
-(pull-request.svg, issue.svg) are GitHub's Octicons
-(https://github.com/primer/octicons), licensed under the MIT License,
-Copyright (c) GitHub Inc.
 
 The helper (xplat/herdr-contr-feed) draws mermaid diagrams with mermaid-rs-renderer
 (https://github.com/1jehuang/mermaid-rs-renderer), licensed under the MIT License,
