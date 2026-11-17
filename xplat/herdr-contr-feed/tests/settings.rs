@@ -136,12 +136,15 @@ fn contr_home_gives_the_settings() {
     assert!(run_with(&REMOTE, &vars).contains(r#""code":"remote-off""#));
 }
 
-/// `update install` writes a Herdr home: a CONTR_HOME that is not `<home>/herdr-contr` has none, so it stops first.
+/// `update install` works for each root: a CONTR_HOME that is not `<home>/herdr-contr` does not stop with
+/// `usage` (#6). A curl that cannot start stops it before anything is read or written.
 #[test]
-fn update_install_needs_a_herdr_home() {
+fn update_install_works_for_a_neutral_root() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("backend");
     fs::create_dir_all(&root).unwrap();
-    let out = run_with(&["update", "install"], &[("CONTR_HOME", root.as_path())]);
-    assert!(out.contains("update install needs --home <herdr-app home>"), "{out}");
+    let curl = tmp.path().join("no-curl");
+    let out = run_with(&["update", "install"], &[("CONTR_HOME", root.as_path()), ("HERDR_CONTR_CURL", curl.as_path()), ("HERDR_CONTR_REPO", std::path::Path::new("o/r"))]);
+    assert!(out.contains(r#""code":"no-network""#) && !out.contains(r#""code":"usage""#), "{out}");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 0, "nothing was written");
 }

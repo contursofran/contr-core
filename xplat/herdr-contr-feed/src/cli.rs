@@ -19,8 +19,10 @@
 //!   herdr-contr-feed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
 //!   herdr-contr-feed helper remove --machine <m>
 //!   herdr-contr-feed statusline on|off|status [--settings <file>]   (herdr-contr's status line wrapper in Claude Code)
-//!   herdr-contr-feed update check [--force]   (the installed and the newest release build; read only)
-//!   herdr-contr-feed update install   (downloads the newest build, checks it, installs it; after the user's press)
+//!   herdr-contr-feed update check [--force]   (the installed and the newest release, their versions and the
+//!                                            releases' changes; writes only update.json)
+//!   herdr-contr-feed update install   (downloads the newest build, checks it, installs it into --home or the root;
+//!                                    after the user's press)
 //!   herdr-contr-feed home move [--dry-run]   (moves the core's root to ~/.config/contr-core; plain text, the owner runs it)
 //!
 //! Every command takes `--home <herdr-app home>` (the mod passes it): its herdr-contr/config.json has the
@@ -187,18 +189,21 @@ pub fn run(argv: &[String]) -> String {
             }
         }
         "update" => {
-            let Some(dir) = config::dir(home().as_deref()) else { return r.fail("usage", "update needs --home <herdr-app home>") };
-            let gh = crate::release::Gh::from_process();
+            let Some(dir) = config::dir(home().as_deref()) else { return r.fail("usage", "update needs a root of the core: --home <herdr-app home> or CONTR_HOME") };
+            let src = crate::release::Releases::from_process();
             let done = match args.first().map(String::as_str) {
                 Some("check") => {
                     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                    crate::release::check(&gh, &dir, now, has("--force")).map(|l| vec![l])
+                    crate::release::check(&src, &dir, now, has("--force")).map(|l| vec![l])
                 }
-                // The install writes a Herdr home: only a root that is `<herdr-app home>/herdr-contr` has one.
-                Some("install") => match dir.parent().filter(|_| dir.file_name().is_some_and(|n| n == herdr_core::places::FOLDER)) {
-                    Some(h) => crate::release::install(&gh, h, &std::env::temp_dir()),
-                    None => return r.fail("usage", "update install needs --home <herdr-app home>"),
-                },
+                // With --home the zip's helper installs into that Herdr home, else into the root (CONTR_HOME).
+                Some("install") => {
+                    let dest = match home().filter(|h| !h.is_empty()) {
+                        Some(h) => crate::release::Dest::Home(PathBuf::from(h)),
+                        None => crate::release::Dest::Root(dir),
+                    };
+                    crate::release::install(&src, &dest, &std::env::temp_dir())
+                }
                 _ => return r.fail("usage", "update needs check or install"),
             };
             match done {

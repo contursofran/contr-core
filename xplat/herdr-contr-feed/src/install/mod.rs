@@ -24,7 +24,8 @@ Usage: herdr-contr-feed install [--backend] [--home <herdr-app home>] [--helper 
                                 [--orch <herdr-contr-orch>] [--remote <folder>] [--dry-run]
  - It writes into the core's root only: kit/ (a file there that this version does not have is removed),
    .claude-plugin/marketplace.json, bin/herdr-contr-feed (with --helper), bin/herdr-contr-orch (with --orch),
-   remote/ (with --remote), and \"build\" in install.json (the record of an install of the mod stays).
+   remote/ (with --remote), and \"build\" and \"release\" (the version, null for a build from source) in
+   install.json (the record of an install of the mod stays).
  - The root is <home>/herdr-contr with --home, else $CONTR_HOME, else $HERDR_APP_HOME/herdr-contr, else
    the root this helper is installed in, else ~/.config/contr-core when it exists, else ~/.config/contr-backend when it exists, else
    ~/.config/herdr-app/herdr-contr when it exists, else ~/.config/contr-core.
@@ -91,7 +92,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// `install --backend`: the kit, the marketplace file, the programs given and `remote/`, into the backend root
-/// only, and `"build"` in its install.json (an existing `"files"` stays). No mod file and no `herdr-app check`.
+/// only, and `"build"` and `"release"` in its install.json (an existing `"files"` stays). No mod file and no `herdr-app check`.
 fn install_backend(places: &Places, helper: Option<&str>, orch: Option<&str>, remote: Option<&str>, dry: bool) -> i32 {
     let root = places.folder();
     if let Some(h) = helper {
@@ -118,7 +119,7 @@ fn install_backend(places: &Places, helper: Option<&str>, orch: Option<&str>, re
     let backend = Backend { helper, orch, remote, moved: Vec::new(), kit_old };
     println!("{}{}", if dry { "Dry run: would install the core into " } else { "Installing the core into " }, root.display());
     backend.plan(&root, "");
-    println!("  install.json (\"build\")");
+    println!("  install.json (\"build\", \"release\")");
     if dry {
         println!("Dry run: nothing was written.");
         return 0;
@@ -133,6 +134,7 @@ fn install_backend(places: &Places, helper: Option<&str>, orch: Option<&str>, re
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
         record.insert("build".into(), Value::from(crate::protocol::BUILD));
+        record.insert("release".into(), Value::from(crate::update::release()));
         put(&marker_path, (serde_json::to_string_pretty(&record).unwrap() + "\n").as_bytes(), false)
     })();
     if let Err(e) = written {

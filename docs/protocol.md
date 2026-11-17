@@ -64,8 +64,8 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
-| `update check` | `--home <herdr-app home>` `[--force]` (Rust sidecar only; read only) | `update` |
-| `update install` | `--home <herdr-app home>` (Rust sidecar only; only after the owner's press) | `update-plan`, `update-done` |
+| `update check` | `[--home <herdr-app home>]` `[--force]` (Rust sidecar only; writes only `update.json`) | `update` |
+| `update install` | `[--home <herdr-app home>]` (Rust sidecar only; only after the owner's press) | `update-plan`, `update-done` |
 
 `card` and `commands` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `keys` too: only on the owner's key or press on the panel card. `send` types a message and presses Enter.
@@ -171,6 +171,8 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 | `remote-off` | The person chose Never for the helper on other machines (config.json `remote_helper`). Nothing ran there. |
 | `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
 | `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |
+| `no-network` | `update`: curl could not start or could not reach the server; `message` has curl's error. |
+| `http` | `update`: the server gave another HTTP status than 200 (404 for `release.json` asks gh instead). |
 
 ### `version`
 
@@ -237,21 +239,39 @@ Writes go through a temp file and a rename. A missing file is made. `own`: the o
 ### `update` (`update check`), `update-plan` and `update-done` (`update install`)
 
 ```json
-{"type":"update","installed":"1111111 2026-11-10","newest":"abc1234 2026-11-16","tag":"build-2026-11-16-abc1234","url":"https://…","differs":true,"checked_at":1763251200}
+{"type":"update","installed":"1111111 2026-11-10","newest":"abc1234 2026-11-16","tag":"build-2026-11-16-abc1234","url":"https://…","differs":true,"checked_at":1763251200,"installed_version":"0.1.6","newest_version":"0.1.7","newer":true,"root":"…/.config/contr-core","releases":[{"version":"0.1.7","tag":"build-2026-11-16-abc1234","date":"2026-11-16","changes":["…"]}]}
 {"type":"update-plan","text":"Dry run: would install into …"}
-{"type":"update-done","installed":"abc1234 2026-11-16","tag":"build-2026-11-16-abc1234","text":"Installing into …"}
+{"type":"update-done","installed":"abc1234 2026-11-16","tag":"build-2026-11-16-abc1234","version":"0.1.7","text":"Installing into …"}
 ```
 
-- The releases come from `gh release view` and `gh release download` for the repository the helper was built from
-  (`HERDR_CONTR_REPO` overrides it; `HERDR_CONTR_GH` names the gh program). The newest is the latest release with a
-  `build-<date>-<sha7>` tag and the asset `herdr-contr-<tag>.zip`.
-- `installed` is `<home>/herdr-contr/install.json` `build`, else the helper's own build. `newest` is the tag as a build
+- Both work for each root of the core (the root of `config.json` above): `<home>/herdr-contr` with `--home`, else
+  `CONTR_HOME`, else the other places, e.g. `~/.config/contr-core`.
+- The releases come from the release's asset `release.json` (schema 1, see AGENTS.md, "Releases"):
+  `curl` reads `https://github.com/<repo>/releases/latest/download/release.json` and downloads
+  `https://github.com/<repo>/releases/download/<tag>/herdr-contr-<tag>.zip`. `<repo>` is the repository the helper
+  was built from (`HERDR_CONTR_REPO` overrides it); `HERDR_CONTR_CURL` names the curl program and
+  `HERDR_CONTR_RELEASE_URL` another URL of the file (for tests). The file must name the zip in `assets` and its
+  hash in `sha256`.
+- When the file is not there (HTTP 404) or is not schema 1, the releases come from `gh release view` and
+  `gh release download`, as before (`HERDR_CONTR_GH` names the gh program). The newest is the latest release with a
+  `build-<date>-<sha7>` tag and the asset `herdr-contr-<tag>.zip`. Another failure of curl stops the command with
+  its error (`no-network`: curl could not start or reach the server; `http`: another HTTP status); gh is then not
+  asked.
+- `installed` is the root's `install.json` `build`, else the helper's own build. `newest` is the tag as a build
   stamp. `differs`: the two shas differ.
-- `check` keeps the newest release in `<home>/herdr-contr/update.json` for a day; `--force` asks again.
-- `install` downloads the zip into a new folder in the temp folder, checks the release digest (when gh gives one) and
-  every line of `remote/SHA256SUMS`, and that the helper for this machine is the one the sums name. Then the zip's helper
-  runs `install --backend --home <home> --helper … --remote … [--orch …] --dry-run`, then the same without `--dry-run`. The first
-  error stops it (codes `no-repo`, `no-gh`, `gh`, `no-build`, `check`, `unzip`, `install`); the temp folder goes after.
+- `installed_version` is the root's `install.json` `release` (`null` for an install made before it), else, with no
+  `install.json`, the helper's own `release`. `newest_version` is `version` of `release.json` (`null` from gh).
+  `newer`: `newest_version` is a higher version than `installed_version`; when one of them is `null`, the same as
+  `differs`. `root` is the path of the root. `releases` is `releases` of `release.json` (`[]` from gh).
+- `check` keeps the newest release (`checked_at`, `tag`, `url`, `version`, `releases`) in the root's `update.json`
+  for a day; `--force` asks again.
+- `install` downloads the zip into a new folder in the temp folder, checks the zip's hash (`sha256` of
+  `release.json`, or the digest gh gives) and every line of `remote/SHA256SUMS`, and that the helper for this
+  machine is the one the sums name. Then the zip's helper runs `install --backend --home <home> --helper …
+  --remote … [--orch …] --dry-run` with `--home`, else the same with `CONTR_HOME=<root>` and no `--home`; then the
+  same without `--dry-run`. That install writes `build` and `release` in the root's `install.json`. `update-done`
+  `version` is the release's version (`null` from gh). The first error stops it (codes `no-repo`, `no-network`,
+  `http`, `no-gh`, `gh`, `no-build`, `check`, `unzip`, `install`); the temp folder goes after.
 
 ### `installed` (`helper install`), `removed` (`helper remove`)
 
