@@ -21,8 +21,8 @@ Claude Code kit. The contr-desktop app and the agents use them.
   `CONTR_HOME`, else the Herdr home's `herdr-contr` folder (#255). The
   default root is the neutral folder `~/.config/contr-core` when it exists,
   else the old neutral folder `~/.config/contr-backend` when it exists, else
-  `~/.config/herdr-app/herdr-contr` when it exists (#264; contr-core
-  issue 2). The
+  `~/.config/herdr-app/herdr-contr` when it exists (#264; decision
+  `3-core-home`). The
   mod reads and changes them only through the tool (#186).
 
 ## Layout
