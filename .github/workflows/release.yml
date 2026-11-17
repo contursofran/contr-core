@@ -2,6 +2,7 @@ name: Release
 
 # A release for each commit on main that passes CI: the helper for macOS (universal) and Linux (musl, x86_64 and
 # aarch64), the orchestration tool for macOS, and install.sh, in one zip. Tag: build-<commit date>-<short sha>.
+# Version: 0.1.<run number>. The notes and the asset release.json come from scripts/release-notes.mjs.
 # The last 10 build- releases stay. workflow_dispatch builds the current head of the chosen branch (a test run).
 on:
   workflow_run:
@@ -28,6 +29,7 @@ jobs:
       sha: ${{ steps.s.outputs.sha }}
       date: ${{ steps.s.outputs.date }}
       tag: ${{ steps.s.outputs.tag }}
+      version: ${{ steps.s.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,6 +40,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "date=$date" >> "$GITHUB_OUTPUT"
           echo "tag=build-$date-${SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "version=0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
   macos:
     needs: stamp
@@ -46,6 +49,7 @@ jobs:
     env:
       HERDR_CONTR_BUILD_SHA: ${{ needs.stamp.outputs.sha }}
       HERDR_CONTR_BUILD_DATE: ${{ needs.stamp.outputs.date }}
+      HERDR_CONTR_VERSION: ${{ needs.stamp.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,7 +89,9 @@ jobs:
           done
           echo signed > out/SIGNED
       - name: Check the stamp
-        run: out/herdr-contr-feed --version | grep -F "(${SHA::7} $HERDR_CONTR_BUILD_DATE)"
+        run: |
+          out/herdr-contr-feed --version | grep -F "(${SHA::7} $HERDR_CONTR_BUILD_DATE)"
+          out/herdr-contr-feed version | grep -F "\"release\":\"$HERDR_CONTR_VERSION\""
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -105,6 +111,7 @@ jobs:
     env:
       HERDR_CONTR_BUILD_SHA: ${{ needs.stamp.outputs.sha }}
       HERDR_CONTR_BUILD_DATE: ${{ needs.stamp.outputs.date }}
+      HERDR_CONTR_VERSION: ${{ needs.stamp.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,7 +119,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y musl-tools && rustup target add ${{ matrix.target }}
       - run: cargo build --locked --release --manifest-path xplat/Cargo.toml -p herdr-contr-feed --target ${{ matrix.target }}
       - name: Check the stamp
-        run: xplat/target/${{ matrix.target }}/release/herdr-contr-feed --version | grep -F "(${SHA::7} $HERDR_CONTR_BUILD_DATE)"
+        run: |
+          xplat/target/${{ matrix.target }}/release/herdr-contr-feed --version | grep -F "(${SHA::7} $HERDR_CONTR_BUILD_DATE)"
+          xplat/target/${{ matrix.target }}/release/herdr-contr-feed version | grep -F "\"release\":\"$HERDR_CONTR_VERSION\""
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
@@ -144,23 +153,22 @@ jobs:
           for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do cp "artifacts/$t/herdr-contr-feed" "$d/remote/$t/"; done
           chmod +x "$d/install.sh" "$d"/bin/* "$d"/remote/*/herdr-contr-feed
           (cd "$d/remote" && sha256sum */herdr-contr-feed > SHA256SUMS)
-          zip -r -y "$d.zip" "$d"
-          echo "ZIP=$d.zip" >> "$GITHUB_ENV"
+          mkdir -p dist; zip -r -y "dist/$d.zip" "$d"
+      # The notes: the version line, a "## Changes" part (the commits since the release before), the build line,
+      # the install line and, when unsigned, the quarantine lines. scripts/release-notes.mjs reads the releases and
+      # the commits with the GitHub API. It also writes release.json: this release, its zip and the zip's SHA-256,
+      # and the change log of the newest 10 releases (contr-desktop reads it).
+      - name: Notes
+        run: |
+          unsigned=""; if [ "$(cat artifacts/macos/SIGNED)" != signed ]; then unsigned="--unsigned"; fi
+          node scripts/release-notes.mjs --version "${{ needs.stamp.outputs.version }}" --sha "$SHA" --date "${{ needs.stamp.outputs.date }}" \
+            --tag "$TAG" --repo "${{ github.repository }}" $unsigned --json release.json --assets dist > notes.md
       - name: Publish
         run: |
-          {
-            echo "Build of ${SHA} ($(git log -1 --format=%cs)) on main."
-            echo
-            echo "Install: unzip, then run \`./install.sh\` in the folder (\`--dry-run\` first to see what it does)."
-            if [ "$(cat artifacts/macos/SIGNED)" != signed ]; then
-              echo
-              echo "The macOS binaries are not signed (no certificate in the repository secrets)."
-              echo "If macOS blocks them, run \`xattr -d com.apple.quarantine bin/* remote/*/herdr-contr-feed\` in the folder."
-            fi
-          } > notes.md
           # A test run from a branch other than main is a prerelease, so it is never the newest build.
           pre=""; if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" != main ]; then pre="--prerelease"; fi
-          gh release create "$TAG" "$ZIP" --target "$SHA" --title "$TAG" --notes-file notes.md $pre
+          gh release create "$TAG" dist/* release.json --target "$SHA" --title "$TAG" --notes-file notes.md $pre
+      # Deleting a release deletes its assets, its release.json too.
       - name: Keep the last 10 builds
         run: |
           gh release list --limit 200 --json tagName,createdAt --jq '[.[] | select(.tagName | startswith("build-"))] | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' |

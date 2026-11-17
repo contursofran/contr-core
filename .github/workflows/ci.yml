@@ -1,6 +1,6 @@
 name: CI
 
-# The tests of contr's core. Linux only.
+# The tests of contr's core and of the release notes script. Linux only.
 on:
   push:
     branches: [main]
@@ -21,6 +21,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # The release's notes and release.json (scripts/release-notes.mjs): its test, then a dry run with the GitHub API.
+      - name: Release notes test
+        run: node --test scripts/release-notes.test.mjs
+
+      - name: Release notes dry run
+        run: node scripts/release-notes.mjs --dry-run --json "$RUNNER_TEMP/release.json" && cat "$RUNNER_TEMP/release.json"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

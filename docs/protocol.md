@@ -179,8 +179,10 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
-`release`: the herdr-contr release this helper was built for (`x.y.z`), or
-`null` for a build from source. The release's package job checks that every helper it ships says the tag's version.
+`release`: the contr-core release this helper was built for (`0.1.<run number>` of the release workflow, from
+`HERDR_CONTR_VERSION` at build time), or `null` for a build from source. The release's "Check the stamp" steps check
+that every helper it ships says the release's version. The same version is in the release's first notes line
+(`contr-core 0.1.<run> from <sha>.`) and in its asset `release.json` (see AGENTS.md, "Releases").
 
 ### `phone` (`phone status`, `on`, `off`)
 

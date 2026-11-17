@@ -60,6 +60,7 @@ The parts of `xplat/herdr-contr-orch`:
 ## Checks
 
 - `cargo test --locked --manifest-path xplat/Cargo.toml -p herdr-contr-feed -p herdr-core -p herdr-contr-orch`.
+- `node --test scripts/release-notes.test.mjs` when you change the release notes script.
 - It must pass, and the `CI` check on the PR, before you report done.
 
 ## Design rules (lessons from contr)
@@ -86,9 +87,23 @@ The parts of `xplat/herdr-contr-orch`:
   to `main`. It builds the helper for macOS (universal) and Linux (musl,
   x86_64 and aarch64) and the orchestration tool for macOS. It publishes
   one zip as the release `build-<commit date>-<short sha>`, and deletes all
-  but the last 10 `build-` releases.
+  but the last 10 `build-` releases (with their assets, `release.json` too).
+- The version is `0.1.<run number>` of the workflow. Each build job sets it
+  in `HERDR_CONTR_VERSION`, so `herdr-contr-feed version` says
+  `"release":"0.1.<run>"`; the "Check the stamp" steps check it.
 - The zip holds `install.sh`, `bin/`, `remote/<target>/` and
   `remote/SHA256SUMS`. On the other machine: unzip, then `./install.sh`.
+- `scripts/release-notes.mjs` writes the notes and the asset `release.json`
+  (the same approach as contr-desktop's). The notes start with
+  `contr-core 0.1.<run> from <sha>.`, then a `## Changes` part: one `- `
+  line for each commit subject after the release before, newest first (no
+  release before: the last 20; no commits: no part), then the build and
+  install lines. `release.json` (schema 1) has `version`, `tag`, `sha`,
+  `date` (ISO time), `assets` (the zip), `sha256` (the zip's hash) and
+  `releases`: the newest 10 releases with a version line, this one first,
+  each with `version`, `tag`, `date` (`YYYY-MM-DD`) and `changes`.
+  contr-desktop reads it. CI runs the script's test
+  (`node --test scripts/release-notes.test.mjs`) and a dry run.
 - The build stamp (`<short sha> <commit date>`) comes from
   `HERDR_CONTR_BUILD_SHA` and `HERDR_CONTR_BUILD_DATE`, else from git
   (`xplat/build-stamp.rs`).
