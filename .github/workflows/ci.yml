@@ -1,7 +1,6 @@
 name: CI
 
-# The mod's tests and the helper's tests, and the backend's tests without herdr-app/. Linux only: no Herdr app
-# and no window.
+# The tests of contr's core. Linux only.
 on:
   push:
     branches: [main]
@@ -16,49 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Mod and helper tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: xplat -> target
-
-      - name: Build the helper
-        run: cargo build --locked --manifest-path xplat/Cargo.toml -p herdr-contr-feed
-
-      - name: Helper tests
-        run: cargo test --locked --manifest-path xplat/Cargo.toml -p herdr-contr-feed -p herdr-core -p herdr-contr-orch
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      # The mod's tests, with the helper that this run built (sidecar.real.test.mjs).
-      - name: Mod tests
-        working-directory: herdr-app
-        env:
-          HERDR_CONTR_FEED: ${{ github.workspace }}/xplat/target/debug/herdr-contr-feed
-        run: npm test
-
-      # The list of backend paths for the export to contr-backend (#253).
-      - name: Backend paths
-        run: node --test scripts/backend-paths.test.mjs
-
   backend:
-    name: Backend without the mod
+    name: Backend tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
-      # The backend reads no file of herdr-app/ at build time or at run time.
-      - name: Remove the mod
-        run: rm -rf herdr-app
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
