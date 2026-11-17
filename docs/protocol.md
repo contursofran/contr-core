@@ -74,10 +74,10 @@ owner presses a button, never on a timer. `keys` too: only on the owner's key or
 `--cache` is a file the sidecar may read and write; the mod passes `<herdr-app home>/herdr-contr/cache.json`.
 `--home <herdr-app home>`: every command takes it, and the mod always passes its `appHome()`, last; the last `--home`
 counts, so a `--text` that says `--home` is not taken for it. The sidecar reads the
-settings in `config.json` of the backend root: `<home>/herdr-contr` with `--home`; without it `$CONTR_HOME` (the root
+settings in `config.json` of the core's root: `<home>/herdr-contr` with `--home`; without it `$CONTR_HOME` (the root
 itself), else `$HERDR_APP_HOME/herdr-contr`, else the folder the sidecar is in when that is `<home>/herdr-contr/bin`,
-else `~/.config/contr-backend` when it exists, else `~/.config/herdr-app/herdr-contr` when it exists, else
-`~/.config/contr-backend`. An empty variable counts as unset. With `"remote_helper": "never"`, every command for a terminal on another machine, and
+else `~/.config/contr-core` when it exists, else `~/.config/contr-backend` (the old default) when it exists, else
+`~/.config/herdr-app/herdr-contr` when it exists, else `~/.config/contr-core`. An empty variable counts as unset. With `"remote_helper": "never"`, every command for a terminal on another machine, and
 `helper install` and `remove`, stop with the error `remote-off` before anything runs there.
 
 ### Terminals on another machine (`m/t7`; Rust sidecar only)
@@ -324,7 +324,7 @@ asked for in 7 days are removed from the folder; other files never. Errors: `usa
 ```
 
 The checks of the install in `--home`, in this order (#217). It writes nothing. `state`: `ok`, `warn` or
-`fail`; `fix` is empty for `ok`. The checks `orch` and `kit` read the backend root (`--home`'s `herdr-contr`,
+`fail`; `fix` is empty for `ok`. The checks `orch` and `kit` read the core's root (`--home`'s `herdr-contr`,
 else `CONTR_HOME`, as the other commands); the others read the Herdr home. A helper built without the feature
 `herdr-mod` gives only `orch` and `kit`. The mod gives the layout in use (`shared("layout")`) and the versions of Herdr
 and hc (`updates()`); a missing one is "unknown".
@@ -334,9 +334,9 @@ and hc (`updates()`); a missing one is "unknown".
 | `mods` | `herdr-contr/install.json` is there, the files of our mods match its hashes, and its `build` is the helper's build |
 | `layout` | the layout in use is `herdr-contr` or `herdr-contr-own`, and its file matches `install.json` |
 | `collisions` | no other mod has a name that starts with `herdr-contr` or the title of one of our mods, and each mod that our layouts name is in `mods/` |
-| `orch` | `bin/herdr-contr-orch --version` in the backend root runs and gives the helper's build |
+| `orch` | `bin/herdr-contr-orch --version` in the core's root runs and gives the helper's build |
 | `hc` | hc (herdr-core) answers on its socket |
-| `kit` | the kit is in `kit/` of the backend root, and Claude Code's marketplace `contr` (`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/known_marketplaces.json`) is the backend root |
+| `kit` | the kit is in `kit/` of the core's root, and Claude Code's marketplace `contr` (`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/known_marketplaces.json`) is the core's root |
 | `herdr` | Herdr is 0.1.16 or later |
 
 ### `favicon` (`favicon --path <file> --dir <folder>`)
@@ -578,7 +578,7 @@ any other key: `failed`, nothing sent. No panel on screen: `changed`, nothing se
   with no data is not in `plans`.
 - Claude: kinds `five_hour` and `seven_day`, from two sources; when both have data, the one with the newer
   `read_at` is used (the same time: the record).
-  1. The status line records: the `<session id>.json` files in `statusline` of the backend root (the root as in
+  1. The status line records: the `<session id>.json` files in `statusline` of the core's root (the root as in
      `--home` above, without `--home`; the wrapper of `statusline` writes them). The files are sorted by file time, the
      newest first, and only the newest 20 are read. The first with a `rate_limits` window is used:
      `rate_limits.five_hour` and `rate_limits.seven_day`, each with `used_percentage` and `resets_at`; a window

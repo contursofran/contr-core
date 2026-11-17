@@ -1,6 +1,7 @@
-//! `herdr-contr-feed home move [--dry-run]`: moves the backend root from the Herdr home
-//! (`~/.config/herdr-app/herdr-contr`) to the neutral folder (`~/.config/contr-backend`), and leaves a link at the
-//! old path. The owner runs it; no install and no agent does.
+//! `herdr-contr-feed home move [--dry-run]`: moves the core's root to the neutral folder (`~/.config/contr-core`),
+//! and leaves a link at the old path. The old root is the old neutral folder (`~/.config/contr-backend`) when it
+//! exists, else the one in the Herdr home (`~/.config/herdr-app/herdr-contr`). The owner runs it; no install and no
+//! agent does.
 //! Plain text for a person, and an exit code (0 done, 1 stopped, 2 bad arguments); not JSON Lines.
 
 use serde_json::Value;
@@ -11,10 +12,10 @@ use std::process::{Command, Stdio};
 use herdr_core::places;
 
 const HELP: &str = "\
-Moves the backend root from the Herdr home to the neutral folder.
+Moves the core's root to the neutral folder.
 Usage: herdr-contr-feed home move [--dry-run]
- - It moves ~/.config/herdr-app/herdr-contr to ~/.config/contr-backend (HOME, else USERPROFILE), and
-   leaves a link at the old path. The mod's paths, --home and Claude Code's marketplace entry stay valid.
+ - It moves ~/.config/contr-backend when it exists, else ~/.config/herdr-app/herdr-contr, to
+   ~/.config/contr-core (HOME, else USERPROFILE), and leaves a link at the old path. The mod's paths, --home and Claude Code's marketplace entry stay valid.
  - It stops and writes nothing when: the neutral folder exists and is not empty; agents.json.lock or
    owner.json.lock is held; `herdr-contr-orch agents ls --json` shows a live worker, or cannot run; the
    phone service file names the old path; the two folders are on different file systems.
@@ -55,7 +56,7 @@ pub fn run(args: &[String]) -> i32 {
         return 2;
     }
     let env = |k: &str| std::env::var(k).unwrap_or_default();
-    let (Some(old), Some(new)) = (places::herdr_root(&env), places::neutral(&env)) else {
+    let (Some(old), Some(new)) = (source(places::old_neutral(&env), places::herdr_root(&env)), places::neutral(&env)) else {
         return stop("STOP: HOME and USERPROFILE are not set, so there is no ~/.config. Nothing was written.");
     };
     let service = crate::phone::Env::from_process().file();
@@ -69,6 +70,11 @@ pub fn run(args: &[String]) -> i32 {
         }
         Err(e) => stop(&e),
     }
+}
+
+/// The root to move: the old neutral folder when it is there (a folder or a link), else the one in the Herdr home.
+fn source(old_neutral: Option<PathBuf>, herdr_root: Option<PathBuf>) -> Option<PathBuf> {
+    old_neutral.filter(|p| fs::symlink_metadata(p).is_ok()).or(herdr_root)
 }
 
 fn stop(line: &str) -> i32 {
@@ -201,7 +207,7 @@ mod tests {
     #[test]
     fn two_file_systems_stop_and_write_nothing() {
         let t = tempfile::tempdir().unwrap();
-        let (old, new) = (t.path().join("herdr-app").join("herdr-contr"), t.path().join("contr-backend"));
+        let (old, new) = (t.path().join("herdr-app").join("herdr-contr"), t.path().join("contr-core"));
         fs::create_dir_all(&old).unwrap();
         fs::write(old.join("owner.json"), "{}").unwrap();
         let other = |p: &Path| Some(if p.starts_with(t.path().join("herdr-app")) { 1 } else { 2 });

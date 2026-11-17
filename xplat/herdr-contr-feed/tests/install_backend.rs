@@ -212,7 +212,7 @@ fn install_is_the_backend_install() {
         .output()
         .unwrap();
     assert_eq!(r.status.code(), Some(0), "{}", both(&r));
-    assert!(out(&r).contains("Installing the backend into"), "{}", out(&r));
+    assert!(out(&r).contains("Installing the core into"), "{}", out(&r));
     assert!(r_dir.join("kit/.claude-plugin/plugin.json").is_file() && r_dir.join(".claude-plugin/marketplace.json").is_file());
     let mut paths = Vec::new();
     all_paths(&s.root, &s.root, &mut paths);

@@ -13,10 +13,10 @@ The helper and its library, in one Cargo workspace.
 cargo test --locked -p herdr-contr-feed -p herdr-core -p herdr-contr-orch
 cargo build -p herdr-contr-feed
 HERDR_CONTR_FEED=$PWD/target/debug/herdr-contr-feed npm --prefix ../herdr-app test   # the mod against this binary
-cargo test --locked --no-default-features -p herdr-contr-feed -p herdr-core -p herdr-contr-orch   # the backend only
+cargo test --locked --no-default-features -p herdr-contr-feed -p herdr-core -p herdr-contr-orch   # the core only
 ```
 
-Without the feature `herdr-mod`, the build reads no file of `herdr-app/`, `install` is the backend install
+Without the feature `herdr-mod`, the build reads no file of `herdr-app/`, `install` is the core's install
 (`install --backend`), and `health` gives only the checks `orch` and `kit`. The CI job `backend` builds it so,
 with no `herdr-app/` folder.
 

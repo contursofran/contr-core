@@ -17,28 +17,30 @@ Claude Code kit. The contr-desktop app and the agents use them.
   to-dos, the MCP tools, the kit) moves here from the contr repository
   (#160): `xplat/herdr-contr-orch` and `kit/`. The helper's `install` puts both in
   the Herdr home (`herdr-contr/kit`, `herdr-contr/bin`). The tool's files
-  (`agents.json`, `owner.json`, `state/`) are in the backend root:
+  (`agents.json`, `owner.json`, `state/`) are in the core's root:
   `CONTR_HOME`, else the Herdr home's `herdr-contr` folder (#255). The
-  default root is the neutral folder `~/.config/contr-backend` when it
-  exists, else `~/.config/herdr-app/herdr-contr` when it exists (#264). The
+  default root is the neutral folder `~/.config/contr-core` when it exists,
+  else the old neutral folder `~/.config/contr-backend` when it exists, else
+  `~/.config/herdr-app/herdr-contr` when it exists (#264; contr-core
+  issue 2). The
   mod reads and changes them only through the tool (#186).
 
 ## Layout
 
 | Path | Side | Holds |
 |---|---|---|
-| `install.sh` | backend | the release zip's installer: it runs the helper's `install` |
-| `docs/protocol.md` | backend | the contract of the helper, which contr-desktop uses (JSON Lines) |
-| `xplat/herdr-contr-feed` | backend | the helper (Rust): reads the agents' session logs and talks to hc; its `install`, `build.rs` and `health` also hold mod parts, behind the Cargo feature `herdr-mod` (off by default) |
-| `xplat/herdr-core` | backend | the helper's hc client, its parsers and `places` |
-| `xplat/herdr-contr-orch` | backend | the orchestration tool (Rust), ported from contr slice by slice (#160); its parts are in the list below the table |
-| `kit`, `.claude-plugin/marketplace.json` | backend | the Claude Code plugin of a coordinator and its workers: the agent definitions, the playbook (`commands/orchestrate.md`), the chat-writing skill, the hooks and the MCP server, which run `herdr-contr-orch`; `.claude-plugin/marketplace.json` at the root names it for Claude Code |
-| `xplat/fixtures` | backend | the session logs and hub answers that the helper's tests read |
-| `xplat/build-stamp.rs` | backend | the build stamp of the helper and the tool |
-| `xplat/herdr-contr-feed/web` | backend | the phone page that the helper embeds (built output; do not edit) |
-| `web`, `scripts/web-build.mjs`, `scripts/sw-test.mjs` | backend | the phone page's source, its build into `xplat/herdr-contr-feed/web`, and its service worker test |
-| `docs/design`, `docs/research` | backend | the notes on the phone page's protocol and on the question keys, that the helper's code names |
-| `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/land.sh` | backend | the CI, the release and the landing of a PR: one job and one zip |
+| `install.sh` | core | the release zip's installer: it runs the helper's `install` |
+| `docs/protocol.md` | core | the contract of the helper, which contr-desktop uses (JSON Lines) |
+| `xplat/herdr-contr-feed` | core | the helper (Rust): reads the agents' session logs and talks to hc; its `install`, `build.rs` and `health` also hold mod parts, behind the Cargo feature `herdr-mod` (off by default) |
+| `xplat/herdr-core` | core | the helper's hc client, its parsers and `places` |
+| `xplat/herdr-contr-orch` | core | the orchestration tool (Rust), ported from contr slice by slice (#160); its parts are in the list below the table |
+| `kit`, `.claude-plugin/marketplace.json` | core | the Claude Code plugin of a coordinator and its workers: the agent definitions, the playbook (`commands/orchestrate.md`), the chat-writing skill, the hooks and the MCP server, which run `herdr-contr-orch`; `.claude-plugin/marketplace.json` at the root names it for Claude Code |
+| `xplat/fixtures` | core | the session logs and hub answers that the helper's tests read |
+| `xplat/build-stamp.rs` | core | the build stamp of the helper and the tool |
+| `xplat/herdr-contr-feed/web` | core | the phone page that the helper embeds (built output; do not edit) |
+| `web`, `scripts/web-build.mjs`, `scripts/sw-test.mjs` | core | the phone page's source, its build into `xplat/herdr-contr-feed/web`, and its service worker test |
+| `docs/design`, `docs/research` | core | the notes on the phone page's protocol and on the question keys, that the helper's code names |
+| `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/land.sh` | core | the CI, the release and the landing of a PR: one job and one zip |
 
 This repository has no `herdr-app/`. The default build reads no file of it.
 The CI job `backend` checks it.
@@ -101,9 +103,10 @@ The parts of `xplat/herdr-contr-orch`:
 ## Safety
 
 - The owner's Herdr app and hc core are live. Do not edit files in the
-  owner's Herdr home (`~/.config/herdr-app`) or in the neutral backend root
-  (`~/.config/contr-backend`) by hand. Never send input to the owner's Herdr
-  app. Never stop, restart or send input to the owner's hc core.
+  owner's Herdr home (`~/.config/herdr-app`) or in the core's neutral root
+  (`~/.config/contr-core`, or the old `~/.config/contr-backend`) by hand.
+  Never send input to the owner's Herdr app. Never stop, restart or send
+  input to the owner's hc core.
 - No agent runs `herdr-contr-feed home move`, with or without `--dry-run`,
   on the owner's files. The owner runs it (#264). Tests run it in a
   temporary HOME.
@@ -118,7 +121,7 @@ The parts of `xplat/herdr-contr-orch`:
   layout.switch` and `herdr-app shot` are allowed, to look at the result.
   Do not install a branch that is not merged.
   On a machine with no Herdr app, `install --backend` is the form: it
-  writes only the kit and the programs into the backend root.
+  writes only the kit and the programs into the core's root.
 - Tests use fakes and fixtures. No test reads the owner's session logs
   (`~/.claude`, `~/.codex` and the others), and no test starts the real
   `claude` program.

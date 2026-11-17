@@ -758,7 +758,7 @@ impl Session {
     /// log path and offset go to `feed --before`; the page's values are only compared.
     /// `attach`: one part of an image for the next `send` (`upload::attach`).
     fn attach(&self, m: &Value, id: &str) -> Vec<Value> {
-        let Some(root) = &self.cfg.root else { return vec![fail(id, "failed", "This helper takes no images: it has no backend root.")] };
+        let Some(root) = &self.cfg.root else { return vec![fail(id, "failed", "This helper takes no images: it has no root of the core.")] };
         let (Some(name), Some(part), Some(parts), Some(data)) = (m["upload"].as_str(), m["part"].as_u64(), m["parts"].as_u64(), m["data"].as_str()) else {
             return vec![fail(id, "badRequest", "attach needs upload, part, parts and data.")];
         };
