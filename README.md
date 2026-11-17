@@ -30,6 +30,11 @@ Download it, unzip it, then run the installer in its folder (`--dry-run` first t
 ./install.sh
 ```
 
+The core's files (the profiles, the owner file, the kit and the programs) are in its root:
+`~/.config/contr-core` by default. A machine with the old folder `~/.config/contr-backend` keeps using it
+until `herdr-contr-feed home move` moves it. [docs/protocol.md](docs/protocol.md) has the full order;
+[docs/decisions/3-core-home.md](docs/decisions/3-core-home.md) has the decision.
+
 ## License
 
 MIT. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

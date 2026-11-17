@@ -1,10 +1,11 @@
-//! The backend root (the folder of the tool's and the helper's files) and the Herdr home. This is the only code
+//! The core's root (the folder of the tool's and the helper's files) and the Herdr home. This is the only code
 //! that knows these names.
 //!
 //! The root is `<flag home>/herdr-contr`, else CONTR_HOME, else `<HERDR_APP_HOME>/herdr-contr`, else the installed
 //! place (a helper in `<root>/bin`, when the root's name is `herdr-contr`), else the default: the neutral folder
-//! `~/.config/contr-backend` when it exists, else `~/.config/herdr-app/herdr-contr` when that exists, else the
-//! neutral folder (HOME, else USERPROFILE). An empty value counts as unset.
+//! `~/.config/contr-core` when it exists, else the old neutral folder `~/.config/contr-backend` when it exists,
+//! else `~/.config/herdr-app/herdr-contr` when that exists, else the neutral folder (HOME, else USERPROFILE). An
+//! empty value counts as unset.
 //!
 //! The Herdr home is the flag value, else HERDR_APP_HOME, else the installed place, else `~/.config/herdr-app`.
 //! Only the install of the mod uses it.
@@ -13,8 +14,11 @@ use std::path::{Path, PathBuf};
 /// The name of the folder of herdr-contr in the Herdr home.
 pub const FOLDER: &str = "herdr-contr";
 
-/// The name of the neutral backend root in `~/.config`.
-pub const NEUTRAL: &str = "contr-backend";
+/// The name of the neutral root of the core in `~/.config`.
+pub const NEUTRAL: &str = "contr-core";
+
+/// The name of the old neutral root in `~/.config` (decision 266), which the root still finds.
+pub const OLD_NEUTRAL: &str = "contr-backend";
 
 /// The user's `.config` folder: HOME, else USERPROFILE. None: neither is set.
 fn user_config(env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
@@ -22,12 +26,17 @@ fn user_config(env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
     given(env("HOME")).or_else(|| given(env("USERPROFILE"))).map(|h| Path::new(&h).join(".config"))
 }
 
-/// The neutral backend root, `~/.config/contr-backend`. None: HOME and USERPROFILE are not set.
+/// The neutral root of the core, `~/.config/contr-core`. None: HOME and USERPROFILE are not set.
 pub fn neutral(env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
     user_config(env).map(|c| c.join(NEUTRAL))
 }
 
-/// The backend root in the default Herdr home, `~/.config/herdr-app/herdr-contr`. None: HOME and USERPROFILE are
+/// The old neutral root, `~/.config/contr-backend`. None: HOME and USERPROFILE are not set.
+pub fn old_neutral(env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
+    user_config(env).map(|c| c.join(OLD_NEUTRAL))
+}
+
+/// The root in the default Herdr home, `~/.config/herdr-app/herdr-contr`. None: HOME and USERPROFILE are
 /// not set.
 pub fn herdr_root(env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
     user_config(env).map(|c| c.join("herdr-app").join(FOLDER))
@@ -44,7 +53,7 @@ pub fn home(flag: Option<&str>, installed: Option<&Path>, env: &dyn Fn(&str) -> 
         .or_else(|| user_config(env).map(|c| c.join("herdr-app")))
 }
 
-/// The backend root. `installed`: the Herdr home that the program is installed in (`installed_home`). `env` gives
+/// The core's root. `installed`: the Herdr home that the program is installed in (`installed_home`). `env` gives
 /// the value of a variable, or an empty string. None: no root is known. The default looks at the real folders.
 pub fn root(flag_home: Option<&str>, installed: Option<&Path>, env: &dyn Fn(&str) -> String) -> Option<PathBuf> {
     root_with(flag_home, installed, env, &|p| p.exists())
@@ -72,10 +81,10 @@ pub fn root_with(
         return Some(h.join(FOLDER));
     }
     let neutral = neutral(env)?;
-    match herdr_root(env) {
-        Some(old) if !exists(&neutral) && exists(&old) => Some(old),
-        _ => Some(neutral),
+    if exists(&neutral) {
+        return Some(neutral);
     }
+    [old_neutral(env), herdr_root(env)].into_iter().flatten().find(|o| exists(o)).or(Some(neutral))
 }
 
 /// The home that the program `exe` is installed in, when it is `<home>/herdr-contr/bin/<program>`. A link is
@@ -87,7 +96,7 @@ pub fn installed_home(exe: &Path) -> Option<PathBuf> {
     (bin.file_name()? == "bin" && folder.file_name()? == FOLDER).then(|| folder.parent().map(Path::to_path_buf)).flatten()
 }
 
-/// The places in one backend root.
+/// The places in one root of the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Places {
     pub root: PathBuf,
@@ -98,11 +107,11 @@ impl Places {
     pub fn new(home: impl Into<PathBuf>) -> Self {
         Places::at(home.into().join(FOLDER))
     }
-    /// The places in the backend root `root`.
+    /// The places in the root `root`.
     pub fn at(root: impl Into<PathBuf>) -> Self {
         Places { root: root.into() }
     }
-    /// The backend root.
+    /// The root.
     pub fn folder(&self) -> PathBuf {
         self.root.clone()
     }
@@ -196,10 +205,12 @@ mod tests {
         let inst = Path::new("/opt/h");
         let hc = |h: &str| Some(Path::new(h).join(FOLDER));
         let p = |h: &str| Some(PathBuf::from(h));
-        // The default folders, and which of them exist: N the neutral one, O the one in the Herdr home.
-        let (un, uo, wn, wo) = ("/u/.config/contr-backend", "/u/.config/herdr-app/herdr-contr", "/w/.config/contr-backend", "/w/.config/herdr-app/herdr-contr");
+        // The default folders, and which of them exist: N the neutral one, B the old neutral one, O the one in the
+        // Herdr home.
+        let (un, ub, uo) = ("/u/.config/contr-core", "/u/.config/contr-backend", "/u/.config/herdr-app/herdr-contr");
+        let (wn, wb, wo) = ("/w/.config/contr-core", "/w/.config/contr-backend", "/w/.config/herdr-app/herdr-contr");
         // (flag home, installed, CONTR_HOME, HERDR_APP_HOME, HOME, USERPROFILE, folders that exist, the root)
-        let rows: [(Option<&str>, Option<&Path>, &str, &str, &str, &str, &[&str], Option<PathBuf>); 21] = [
+        let rows: [(Option<&str>, Option<&Path>, &str, &str, &str, &str, &[&str], Option<PathBuf>); 29] = [
             (Some("/flag"), Some(inst), "/c", "/env", "/u", "/w", &[un, uo], hc("/flag")),
             (Some(""), Some(inst), "/c", "/env", "/u", "/w", &[un, uo], p("/c")),
             (None, Some(inst), "/c", "/env", "/u", "/w", &[un, uo], p("/c")),
@@ -210,7 +221,8 @@ mod tests {
             (None, None, "/c", "", "", "", &[], p("/c")),
             (Some("/flag"), None, "", "", "", "", &[], hc("/flag")),
             (None, None, "", "/env", "", "", &[], hc("/env")),
-            // The default: the neutral folder when it exists, else the Herdr home's when that exists, else neutral.
+            // The default: the neutral folder when it exists, else the old neutral one when it exists, else the
+            // Herdr home's when that exists, else the neutral folder.
             (None, None, "", "", "/u", "/w", &[], p(un)),
             (None, None, "", "", "/u", "/w", &[uo], p(uo)),
             (None, None, "", "", "/u", "/w", &[un], p(un)),
@@ -219,10 +231,18 @@ mod tests {
             (None, None, "", "", "", "/w", &[], p(wn)),
             (None, None, "", "", "", "/w", &[wo], p(wo)),
             (None, None, "", "", "", "/w", &[wn, wo], p(wn)),
+            (None, None, "", "", "/u", "/w", &[ub], p(ub)),
+            (None, None, "", "", "/u", "/w", &[ub, uo], p(ub)),
+            (None, None, "", "", "/u", "/w", &[un, ub], p(un)),
+            (None, None, "", "", "/u", "/w", &[un, ub, uo], p(un)),
+            (None, None, "", "", "/u", "/w", &[wb], p(un)),
+            (None, None, "", "", "", "/w", &[wb, wo], p(wb)),
+            (None, None, "", "", "", "/w", &[wn, wb], p(wn)),
             // The folders in the other places do not change these.
             (None, None, "", "/env", "/u", "/w", &[un], hc("/env")),
             (None, Some(inst), "", "", "/u", "/w", &[un], hc("/opt/h")),
             (None, None, "/c", "", "/u", "/w", &[uo], p("/c")),
+            (None, Some(inst), "", "", "/u", "/w", &[ub], hc("/opt/h")),
         ];
         for (flag, installed, contr, app, user, profile, there, want) in rows {
             let env = |k: &str| {
@@ -233,8 +253,10 @@ mod tests {
         }
         let env = |k: &str| if k == "HOME" { "/u".to_string() } else { String::new() };
         assert_eq!(neutral(&env), p(un));
+        assert_eq!(old_neutral(&env), p(ub));
         assert_eq!(herdr_root(&env), p(uo));
         assert_eq!(neutral(&|_| String::new()), None);
+        assert_eq!(old_neutral(&|_| String::new()), None);
     }
 
     #[cfg(unix)]

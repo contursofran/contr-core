@@ -60,24 +60,27 @@ Usage: herdr-contr-feed install [--home <herdr-app home>] [--helper <herdr-contr
  - After copying it runs `herdr-app check` on the mod. --dry-run prints the plan and writes nothing.
  - What it installed (with hashes) is kept in <home>/herdr-contr/install.json, so a later install
    can update its own files.
- - --backend installs only the backend, for a machine with no Herdr app. It writes into the backend root
+ - --backend installs only the core, for a machine with no Herdr app. It writes into the core's root
    only: kit/ (a file there that this version does not have is removed), .claude-plugin/marketplace.json,
    bin/herdr-contr-feed (with --helper), bin/herdr-contr-orch (with --orch), remote/ (with --remote), and
    \"build\" in install.json (the record of an install of the mod stays). It never writes a layout, a theme,
    a mod or keys.json, and never runs `herdr-app check`. The root is <home>/herdr-contr with --home, else
-   $CONTR_HOME, else $HERDR_APP_HOME/herdr-contr, else ~/.config/herdr-app/herdr-contr.
+   $CONTR_HOME, else $HERDR_APP_HOME/herdr-contr, else the root this helper is installed in, else ~/.config/contr-core when it exists, else ~/.config/contr-backend when it exists, else
+   ~/.config/herdr-app/herdr-contr when it exists, else ~/.config/contr-core.
 ";
 
 #[cfg(not(feature = "herdr-mod"))]
 const HELP: &str = "\
-Installs the herdr-contr backend (this helper is built without the Herdr app mod).
+Installs the core of herdr-contr (this helper is built without the Herdr app mod).
 Usage: herdr-contr-feed install [--backend] [--home <herdr-app home>] [--helper <herdr-contr-feed>]
                                 [--orch <herdr-contr-orch>] [--remote <folder>] [--dry-run]
- - It writes into the backend root only: kit/ (a file there that this version does not have is removed),
+ - It writes into the core's root only: kit/ (a file there that this version does not have is removed),
    .claude-plugin/marketplace.json, bin/herdr-contr-feed (with --helper), bin/herdr-contr-orch (with --orch),
    remote/ (with --remote), and \"build\" in install.json (the record of an install of the mod stays).
  - The root is <home>/herdr-contr with --home, else $CONTR_HOME, else $HERDR_APP_HOME/herdr-contr, else
-   ~/.config/herdr-app/herdr-contr. --backend is accepted and changes nothing. --dry-run writes nothing.
+   the root this helper is installed in, else ~/.config/contr-core when it exists, else ~/.config/contr-backend when it exists, else
+   ~/.config/herdr-app/herdr-contr when it exists, else ~/.config/contr-core.
+ - --backend is accepted and changes nothing. --dry-run writes nothing.
 ";
 
 pub fn run(args: &[String]) -> i32 {
@@ -138,7 +141,7 @@ pub fn run(args: &[String]) -> i32 {
     // Without the Herdr app mod in this build, `install` is the backend install.
     if backend_only || !cfg!(feature = "herdr-mod") {
         let Some(root) = places::root(home.as_deref(), None, &env) else {
-            return stop(&["STOP: no backend root is known: CONTR_HOME, HERDR_APP_HOME and HOME are not set. Name the folder with CONTR_HOME=<folder> or --home <herdr-app home>. Nothing was written.".into()]);
+            return stop(&["STOP: no root of the core is known: CONTR_HOME, HERDR_APP_HOME and HOME are not set. Name the folder with CONTR_HOME=<folder> or --home <herdr-app home>. Nothing was written.".into()]);
         };
         return install_backend(&Places::at(root), helper.as_deref(), orch.as_deref(), remote.as_deref(), dry);
     }
@@ -305,7 +308,7 @@ fn install_backend(places: &Places, helper: Option<&str>, orch: Option<&str>, re
     walk_files(&kit_dest, &mut kit_old);
     kit_old.retain(|p| !KIT.iter().any(|(rel, _)| kit_dest.join(rel) == *p));
     let backend = Backend { helper, orch, remote, moved: Vec::new(), kit_old };
-    println!("{}{}", if dry { "Dry run: would install the backend into " } else { "Installing the backend into " }, root.display());
+    println!("{}{}", if dry { "Dry run: would install the core into " } else { "Installing the core into " }, root.display());
     backend.plan(&root, "");
     println!("  install.json (\"build\")");
     if dry {

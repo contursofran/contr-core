@@ -1,4 +1,4 @@
-//! `home move`: the move of the backend root to the neutral folder, its stops, and the root before and after it.
+//! `home move`: the move of the core's root to the neutral folder, its stops, and the root before and after it.
 //! Each test has its own HOME; the orchestration tool is a fake in the old root's bin.
 #![cfg(unix)]
 
@@ -28,11 +28,19 @@ impl Home {
         self.home.join(".config").join("herdr-app").join("herdr-contr")
     }
     fn neutral(&self) -> PathBuf {
+        self.home.join(".config").join("contr-core")
+    }
+    /// The old neutral folder (decision 266).
+    fn backend(&self) -> PathBuf {
         self.home.join(".config").join("contr-backend")
     }
     /// The fake `herdr-contr-orch agents ls --json` gives `json`.
     fn workers(&self, json: &str) {
-        let p = self.old().join("bin").join("herdr-contr-orch");
+        self.workers_in(&self.old(), json)
+    }
+    /// The fake tool in the root `root`.
+    fn workers_in(&self, root: &Path, json: &str) {
+        let p = root.join("bin").join("herdr-contr-orch");
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, format!("#!/bin/sh\n[ \"$*\" = \"agents ls --json\" ] || exit 9\ncat <<'EOF'\n{json}\nEOF\n")).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
@@ -69,7 +77,7 @@ impl Home {
         out.sort();
         out
     }
-    /// The backend root that the helper uses: the one `install --backend --dry-run` names.
+    /// The root that the helper uses: the one `install --backend --dry-run` names.
     fn root(&self) -> String {
         let o = self.run(&["install", "--backend", "--dry-run"]);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
@@ -106,6 +114,36 @@ fn move_leaves_a_link_and_the_root_follows() {
     assert_eq!(h.root(), h.neutral().display().to_string());
     // A second move finds the link and stops.
     stops(&h, "is a link already");
+}
+
+#[test]
+fn the_default_root_is_contr_core() {
+    let h = Home::new();
+    fs::remove_dir_all(h.old()).unwrap();
+    assert_eq!(h.root(), h.neutral().display().to_string());
+    assert!(h.neutral().ends_with(".config/contr-core"));
+}
+
+#[test]
+fn the_old_neutral_folder_is_found_and_moved() {
+    let h = Home::new();
+    fs::create_dir_all(h.backend()).unwrap();
+    fs::write(h.backend().join("owner.json"), "{\"items\":[1]}").unwrap();
+    h.workers_in(&h.backend(), "[]");
+    // The old neutral folder comes before the one in the Herdr home.
+    assert_eq!(h.root(), h.backend().display().to_string());
+    let o = h.run(&["home", "move", "--dry-run"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains(&format!("would move {} to {}", h.backend().display(), h.neutral().display())), "{out}");
+    assert!(!h.neutral().exists());
+    let o = h.run(&["home", "move"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(fs::read_link(h.backend()).unwrap(), h.neutral());
+    assert_eq!(fs::read_to_string(h.neutral().join("owner.json")).unwrap(), "{\"items\":[1]}");
+    // The folder in the Herdr home stays as it was.
+    assert!(fs::symlink_metadata(h.old()).unwrap().is_dir());
+    assert_eq!(h.root(), h.neutral().display().to_string());
 }
 
 #[test]
