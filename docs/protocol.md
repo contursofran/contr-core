@@ -60,7 +60,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `pictures` | `--path <log> --dir <folder> --pics <json>` (Rust sidecar only) | `picture` for each entry of `--pics` |
 | `favicon` | `--path <file> --dir <folder>` (Rust sidecar only) | `favicon` |
 | `agent-images` | `--log <log> --dir <folder> --srcs <json>` (Rust sidecar only) | `agent-image` for each entry of `--srcs` |
-| `health` | `[--layout <name>] [--herdr <version>] [--hc <version>]` (Rust sidecar only) | `check` for each check |
+| `health` | — (Rust sidecar only) | `check` for each check |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
@@ -248,7 +248,7 @@ Writes go through a temp file and a rename. A missing file is made. `own`: the o
 - `check` keeps the newest release in `<home>/herdr-contr/update.json` for a day; `--force` asks again.
 - `install` downloads the zip into a new folder in the temp folder, checks the release digest (when gh gives one) and
   every line of `remote/SHA256SUMS`, and that the helper for this machine is the one the sums name. Then the zip's helper
-  runs `install --home <home> --helper … --remote … [--orch …] --dry-run`, then the same without `--dry-run`. The first
+  runs `install --backend --home <home> --helper … --remote … [--orch …] --dry-run`, then the same without `--dry-run`. The first
   error stops it (codes `no-repo`, `no-gh`, `gh`, `no-build`, `check`, `unzip`, `install`); the temp folder goes after.
 
 ### `installed` (`helper install`), `removed` (`helper remove`)
@@ -317,7 +317,7 @@ SVG from the root's `width` and `height`, else its `viewBox`). `path: null`: a U
 file, a file over 32 MB, another format, or content that does not match the extension. Copies not written or
 asked for in 7 days are removed from the folder; other files never. Errors: `usage`, `write`.
 
-### `check` (`health [--layout <name>] [--herdr <version>] [--hc <version>]`)
+### `check` (`health`)
 
 ```json
 {"fix":"Install again: unzip the latest release and run ./install.sh.","id":"orch","message":"herdr-contr-orch is from build 1a2b3c4 2026-11-01, the helper is from build 5d6e7f8 2026-11-16.","state":"fail","type":"check"}
@@ -325,19 +325,12 @@ asked for in 7 days are removed from the folder; other files never. Errors: `usa
 
 The checks of the install in `--home`, in this order (#217). It writes nothing. `state`: `ok`, `warn` or
 `fail`; `fix` is empty for `ok`. The checks `orch` and `kit` read the core's root (`--home`'s `herdr-contr`,
-else `CONTR_HOME`, as the other commands); the others read the Herdr home. A helper built without the feature
-`herdr-mod` gives only `orch` and `kit`. The mod gives the layout in use (`shared("layout")`) and the versions of Herdr
-and hc (`updates()`); a missing one is "unknown".
+else `CONTR_HOME`, as the other commands).
 
 | `id` | Checks |
 |---|---|
-| `mods` | `herdr-contr/install.json` is there, the files of our mods match its hashes, and its `build` is the helper's build |
-| `layout` | the layout in use is `herdr-contr` or `herdr-contr-own`, and its file matches `install.json` |
-| `collisions` | no other mod has a name that starts with `herdr-contr` or the title of one of our mods, and each mod that our layouts name is in `mods/` |
 | `orch` | `bin/herdr-contr-orch --version` in the core's root runs and gives the helper's build |
-| `hc` | hc (herdr-core) answers on its socket |
 | `kit` | the kit is in `kit/` of the core's root, and Claude Code's marketplace `contr` (`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/known_marketplaces.json`) is the core's root |
-| `herdr` | Herdr is 0.1.16 or later |
 
 ### `favicon` (`favicon --path <file> --dir <folder>`)
 

@@ -248,22 +248,6 @@ fn version_flag_prints_the_build_stamp() {
     assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("herdr-contr-feed 0.1.0 ({stamp})\n"));
 }
 
-#[test]
-#[cfg(feature = "herdr-mod")]
-fn health_gives_a_check_line_for_each_check() {
-    let home = tempfile::tempdir().unwrap();
-    let h = home.path().to_str().unwrap();
-    let v = run("/nonexistent.sock", &["health", "--layout", "main", "--herdr", "0.1.16", "--home", h]);
-    let ids: Vec<&str> = v.iter().filter(|l| l["type"] == "check").map(|l| l["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["mods", "layout", "collisions", "orch", "hc", "kit", "herdr"]);
-    let state = |id: &str| v.iter().find(|l| l["id"] == id).unwrap()["state"].as_str().unwrap().to_string();
-    assert_eq!(state("mods"), "fail", "an empty home has no install");
-    assert_eq!(state("hc"), "fail", "no socket");
-    assert_eq!(state("layout"), "warn");
-    assert_eq!(state("herdr"), "ok");
-    assert_eq!(v.last().unwrap()["ok"], true);
-}
-
 /// `health` with no --home reads the checks orch and kit in CONTR_HOME, not in HERDR_APP_HOME's herdr-contr.
 #[test]
 fn health_reads_orch_and_kit_in_contr_home() {

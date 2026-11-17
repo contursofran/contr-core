@@ -31,7 +31,7 @@ Claude Code kit. The contr-desktop app and the agents use them.
 |---|---|---|
 | `install.sh` | core | the release zip's installer: it runs the helper's `install` |
 | `docs/protocol.md` | core | the contract of the helper, which contr-desktop uses (JSON Lines) |
-| `xplat/herdr-contr-feed` | core | the helper (Rust): reads the agents' session logs and talks to hc; its `install`, `build.rs` and `health` also hold mod parts, behind the Cargo feature `herdr-mod` (off by default) |
+| `xplat/herdr-contr-feed` | core | the helper (Rust): reads the agents' session logs and talks to hc; its `install` puts the core in its root |
 | `xplat/herdr-core` | core | the helper's hc client, its parsers and `places` |
 | `xplat/herdr-contr-orch` | core | the orchestration tool (Rust), ported from contr slice by slice (#160); its parts are in the list below the table |
 | `kit`, `.claude-plugin/marketplace.json` | core | the Claude Code plugin of a coordinator and its workers: the agent definitions, the playbook (`commands/orchestrate.md`), the chat-writing skill, the hooks and the MCP server, which run `herdr-contr-orch`; `.claude-plugin/marketplace.json` at the root names it for Claude Code |
@@ -60,8 +60,6 @@ The parts of `xplat/herdr-contr-orch`:
 ## Checks
 
 - `cargo test --locked --manifest-path xplat/Cargo.toml -p herdr-contr-feed -p herdr-core -p herdr-contr-orch`.
-  The Cargo feature `herdr-mod` of `herdr-contr-feed` (off by default) holds
-  the mod's parts of the helper.
 - It must pass, and the `CI` check on the PR, before you report done.
 
 ## Design rules (lessons from contr)

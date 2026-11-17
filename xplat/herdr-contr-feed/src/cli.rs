@@ -10,7 +10,7 @@
 //!   herdr-contr-feed queue  --terminal <addr> [--cache <file>]   (the agent's own queue: one `queued` line; read only)
 //!   herdr-contr-feed working --terminal <addr> [--cache <file>]   (the agent's working and background lines on screen; read only)
 //!   herdr-contr-feed model  --terminal <addr> [--cache <file>]   (the agent's model and effort; read only)
-//!   herdr-contr-feed health [--layout <name>] [--herdr <version>] [--hc <version>]   (checks the install; read only)
+//!   herdr-contr-feed health   (checks the install; read only)
 //!   herdr-contr-feed usage   (the Claude and Codex plan usage; read only)
 //!   herdr-contr-feed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   herdr-contr-feed agent-images --log <log> --dir <folder> --srcs <json>   (copies of the images an agent links)
@@ -76,25 +76,11 @@ pub fn run(argv: &[String]) -> String {
         }
         "health" => {
             let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-            // orch and kit: the backend root. The mod's checks: the Herdr home.
+            // orch and kit: the backend root.
             let Some(root) = config::dir(home().as_deref()) else { return r.fail("usage", "health needs --home <herdr-app home>") };
-            #[cfg(feature = "herdr-mod")]
-            let Some(h) = herdr_core::places::home(home().as_deref(), None, &|k| env(k).unwrap_or_default()) else {
-                return r.fail("usage", "health needs --home <herdr-app home>");
-            };
             let i = health::Inputs {
-                #[cfg(feature = "herdr-mod")]
-                home: h,
                 root,
                 build: crate::protocol::BUILD.into(),
-                #[cfg(feature = "herdr-mod")]
-                layout: opt("--layout"),
-                #[cfg(feature = "herdr-mod")]
-                herdr: opt("--herdr"),
-                #[cfg(feature = "herdr-mod")]
-                hc_version: opt("--hc"),
-                #[cfg(feature = "herdr-mod")]
-                hc_up: HcSession::resolve_env().is_available(),
                 claude: health::claude_dir(&env),
                 orch_version: &health::run_orch_version,
             };

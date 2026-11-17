@@ -1,5 +1,5 @@
-//! `herdr-contr-feed install --backend`, and `install` in a build without the feature herdr-mod: the backend
-//! root only, with no mod file. Temp folders only; HOME is one too. A fake herdr-app on PATH records its calls.
+//! `herdr-contr-feed install --backend`, and `install`: the backend root only, with no mod file. Temp folders
+//! only; HOME is one too. A fake herdr-app on PATH records its calls.
 #![cfg(unix)]
 
 use serde_json::{json, Value};
@@ -197,8 +197,7 @@ fn backend_install_without_a_root_stops() {
     assert!(!s.root.join(".config").exists());
 }
 
-/// Without the feature, `install` (no --backend) is the backend install.
-#[cfg(not(feature = "herdr-mod"))]
+/// `install` (no --backend) is the backend install.
 #[test]
 fn install_is_the_backend_install() {
     let s = sandbox();
