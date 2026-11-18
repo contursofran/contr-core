@@ -1,4 +1,4 @@
-//! The kit's hooks, which Claude Code runs with the hook input on stdin. Ported from contr's `contr hook`.
+//! The kit's hooks receive input on stdin. The Claude Code hooks come from contr's `contr hook`.
 //!
 //! `stop` in a worker (CONTR_COORDINATOR is set): a turn that sent no report gets one, sent to the
 //! coordinator, or held for it when hc refuses it. It never stops the turn. In other hc sessions, `stop` and
@@ -25,8 +25,9 @@ pub const USAGE: &str = "Usage:
   herdr-contr-orch hook stop            the kit's Stop hook
   herdr-contr-orch hook session-start   the kit's SessionStart hook (startup, resume, clear, compact)
   herdr-contr-orch hook prompt          the kit's UserPromptSubmit hook
+  herdr-contr-orch hook codex-question  Codex's question PreToolUse hook
 
-Claude Code runs them and gives them the hook input on stdin.
+The agent gives the hook input on stdin.
 
 stop, in a worker (CONTR_COORDINATOR is set): a turn that sent no report
 (hc send or the report tool, with a result that is not an error) gets one,
@@ -113,6 +114,10 @@ struct Effort {
 /// `hook`. The exit code is 0 when the hook is done or has nothing to do, and 1 on an error, usage errors
 /// included. It is never 2: for a Stop hook, 2 blocks the turn and sends stderr to the model.
 pub fn run(args: &[String], env: &dyn Fn(&str) -> String, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write, core: &dyn Core) -> i32 {
+    if args == ["codex-question"] {
+        crate::codex::question_hook(env, input, core);
+        return 0;
+    }
     if args.len() == 1 && args[0] == "prompt" {
         if let Err(e) = prompt(env, input, out, err, core) {
             let _ = writeln!(err, "herdr-contr-orch hook prompt: {e}");
