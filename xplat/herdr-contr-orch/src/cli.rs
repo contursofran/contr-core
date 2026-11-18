@@ -12,7 +12,8 @@ use crate::workers::{self, Core, Manager, Worker};
 pub const USAGE: &str = "Usage:
   herdr-contr-orch agents <command> [args…] list and control the workers (herdr-contr-orch agents help)
   herdr-contr-orch batch flush <terminal>   give the batched reports to the terminal when they are due
-  herdr-contr-orch codex hooks on|off|status [--file <hooks.json>]
+  herdr-contr-orch codex coordinator [Codex arguments…]
+  herdr-contr-orch codex hooks [coordinator] on|off|status [--file <hooks.json>]
   herdr-contr-orch hook <name>              run a hook (see hook help)
   herdr-contr-orch mcp                      serve the coordinator's tools over MCP on stdin and stdout
   herdr-contr-orch owner <command> [args…]  answer questions and mark to-dos done (herdr-contr-orch owner help)
@@ -149,7 +150,7 @@ fn is_help(a: &str) -> bool {
 pub fn run(args: &[String], env: &dyn Fn(&str) -> String, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write, core: &dyn Core) -> i32 {
     match args.first().map(String::as_str) {
         Some("mcp") if args.len() == 1 => run_mcp(env, input, out, err, core),
-        Some("codex") => crate::codex::run(&args[1..], env, out, err),
+        Some("codex") => crate::codex::run(&args[1..], env, out, err, core),
         Some("hook") => crate::hook::run(&args[1..], env, input, out, err, core),
         Some("batch") if args.len() == 3 && args[1] == "flush" => match crate::batch::flush(core, env, &args[2], crate::batch::now()) {
             Ok(r) => {

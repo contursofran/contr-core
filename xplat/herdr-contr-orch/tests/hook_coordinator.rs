@@ -222,3 +222,78 @@ fn session_start_at_startup_gives_an_orchestrator_terminal_the_playbook() {
     let r = hook("session-start", &vars, json!({"source": "startup", "cwd": cwd}), &core);
     assert!(r.out.contains(&format!("First read {cwd}/COORDINATOR-STATE.md: an earlier coordinator of this project wrote it.\n\nYour live workers:")), "{}", r.out);
 }
+
+#[test]
+fn codex_receives_the_playbook_workers_and_owner_items_in_session_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = path(dir.path());
+    let kit = kit(dir.path(), "");
+    fs::write(Path::new(&kit).join("commands/orchestrate.md"), include_str!("../../../kit/commands/orchestrate.md")).unwrap();
+    let owner = dir.path().join("owner.json");
+    let vars = [("CONTR_CODEX_COORDINATOR", "1"), ("HC_TERMINAL_ID", "t1"), ("CONTR_KIT", kit.as_str()), ("CONTR_HOME", cwd)];
+    Store::new(&owner).pin(Todo { coordinator: "t1".into(), text: "Test the build".into(), ..Todo::default() }).unwrap();
+    fs::write(dir.path().join("COORDINATOR-STATE.md"), "Current plan").unwrap();
+    let core = Fake::default().reply("terminal.list", workers());
+    for source in ["startup", "compact", "resume"] {
+        let input = json!({"session_id": "s1", "source": source, "cwd": cwd, "transcript_path": null});
+        let r = hook("codex-session-start", &vars, input, &core);
+        assert_eq!((r.code, r.err.as_str()), (0, ""));
+        let data: Value = serde_json::from_str(&r.out).unwrap();
+        assert_eq!(data["hookSpecificOutput"]["hookEventName"], "SessionStart");
+        let context = data["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        for item in ["COORDINATOR-STATE.md", "skills/chat-writing/SKILL.md", "b-158", "Test the build", "open the worker's screenshot with the image viewer"] {
+            assert!(context.contains(item), "missing {item} after {source}: {context}");
+        }
+        assert!(!context.contains("$ARGUMENTS") && !context.contains("- other"));
+        assert_eq!(context.contains("conversation was compacted"), source == "compact");
+    }
+    assert_eq!(labels(&core), vec![json!({"terminal": "t1", "labels": {"contr.orchestrating": "1"}}); 3]);
+    fs::remove_file(dir.path().join("COORDINATOR-STATE.md")).unwrap();
+    let r = hook("codex-session-start", &vars, json!({"source": "compact", "cwd": cwd}), &core);
+    assert!(r.out.contains("b-158") && !r.out.contains("First read"));
+}
+
+#[test]
+fn codex_stop_continues_once_and_prompt_delivers_later_reports() {
+    use orch::held::Report;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vars = [("CONTR_CODEX_COORDINATOR", "1"), ("HC_TERMINAL_ID", "t1"), ("CONTR_HOME", path(dir.path()))];
+    let env = |k: &str| vars.iter().find(|(key, _)| *key == k).map_or(String::new(), |(_, value)| value.to_string());
+    let core = Fake::default();
+    let queue = |text: &str| orch::held::hold(&env, "t1", &Report { from: "t4 b-158".into(), text: text.into() }).unwrap();
+    queue("PR is ready");
+    // Ordinary Codex sessions and workers ignore the coordinator hooks.
+    let worker = [vars.as_slice(), &[("CONTR_COORDINATOR", "t2")]].concat();
+    for ignored in [&vars[1..], &worker] {
+        for name in ["codex-stop", "codex-prompt", "codex-session-start"] {
+            let r = hook(name, ignored, json!(null), &core);
+            assert_eq!((r.code, r.out.as_str(), r.err.as_str()), (0, "", ""));
+        }
+    }
+    let mut stop = json!({"stop_hook_active": false, "transcript_path": null, "last_assistant_message": null});
+    let r = hook("codex-stop", &vars, stop.clone(), &core);
+    assert_eq!((r.code, r.err.as_str()), (0, ""));
+    let data: Value = serde_json::from_str(&r.out).unwrap();
+    let reason = data["reason"].as_str().unwrap();
+    assert_eq!(data["decision"], "block");
+    assert!(reason.contains("PR is ready"));
+    assert!(!orch::hook::owner_words(reason));
+    queue("CI passed");
+    stop["stop_hook_active"] = json!(true);
+    assert!(hook("codex-stop", &vars, stop, &core).out.is_empty());
+    let r = hook("codex-prompt", &vars, json!({"prompt": "check the PR"}), &core);
+    assert_eq!((r.code, r.err.as_str()), (0, ""));
+    assert!(r.out.contains("Codex plan tool") && r.out.contains("CI passed"));
+    assert!(!r.out.contains("PR is ready") && !r.out.contains("TodoWrite"));
+    assert!(hook("codex-prompt", &vars, json!({"prompt": "<hc>CI passed</hc>"}), &core).out.is_empty());
+
+    fs::write(dir.path().join("agents.json"), r#"{"flow":{"workers":2}}"#).unwrap();
+    let r = hook("codex-prompt", &vars, json!({"prompt": "go on"}), &core);
+    assert!(r.out.contains("the owner changed the flow"));
+    assert!(core.calls().is_empty());
+
+    let r = call_with(&["hook", "codex-prompt"], &vars, &core, "{");
+    assert_eq!((r.code, r.out.as_str()), (0, ""));
+    assert!(r.err.contains("hook prompt"));
+}

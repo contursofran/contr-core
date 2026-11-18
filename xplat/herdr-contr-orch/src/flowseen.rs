@@ -53,7 +53,7 @@ pub fn record(env: &dyn Fn(&str) -> String, id: &str) -> Result<(), String> {
 /// The context for a coordinator when the flow or the models changed after the terminal `id` saw them last,
 /// else "". With no saved flow it only saves one: there is nothing to compare. hc is asked for the role only
 /// after a change, so most calls read two small files and no more.
-pub fn change(env: &dyn Fn(&str) -> String, core: &dyn Core, id: &str) -> Result<String, String> {
+pub fn change(env: &dyn Fn(&str) -> String, core: &dyn Core, id: &str, coordinator: bool) -> Result<String, String> {
     let Some(path) = seen_path(env, id) else { return Ok(String::new()) };
     let text = flow_state(env)?;
     match fs::read_to_string(&path) {
@@ -64,6 +64,11 @@ pub fn change(env: &dyn Fn(&str) -> String, core: &dyn Core, id: &str) -> Result
     }
     // Save first: a role check that fails does not ask hc again on each call.
     save(&path, &text)?;
-    let w = Manager::new(core, String::new()).get(id)?;
-    Ok(if w.orchestrating || w.role == ROLE_ORCHESTRATOR { format!("{CHANGED_LEAD}{text}") } else { String::new() })
+    if !coordinator {
+        let w = Manager::new(core, String::new()).get(id)?;
+        if !w.orchestrating && w.role != ROLE_ORCHESTRATOR {
+            return Ok(String::new());
+        }
+    }
+    Ok(format!("{CHANGED_LEAD}{text}"))
 }
