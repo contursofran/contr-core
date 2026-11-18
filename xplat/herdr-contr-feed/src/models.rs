@@ -23,11 +23,13 @@ pub struct Arg {
     pub value: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub label: String,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub tiers: &'static [&'static str],
 }
 
 impl Arg {
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Arg {
-        Arg { value: value.into(), label: label.into() }
+        Arg { value: value.into(), label: label.into(), tiers: &[] }
     }
 }
 
@@ -77,7 +79,26 @@ pub fn values(kind: &str, home: &Path) -> Vec<Arg> {
         "agy" => AGY_MODELS.iter().for_each(|(v, n)| l.add(v, n)),
         _ => {}
     }
+    for arg in &mut l.out {
+        arg.tiers = tiers(kind, &arg.value);
+    }
     l.out
+}
+
+/// Accelerated speeds documented for the model. No entry means no documented support.
+pub fn tiers(kind: &str, model: &str) -> &'static [&'static str] {
+    match kind {
+        "claude" => match crate::status::base_model(model).as_str() {
+            "claude-fable-5-2" | "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8" | "opus" | "fable" => &["fast"],
+            _ => &[],
+        },
+        "codex" => match model {
+            "gpt-6.2-astra" | "gpt-6.2-sol" | "gpt-6-astra" | "gpt-6.1-sol" => &["fast", "ultrafast"],
+            "gpt-6.1-terra" | "gpt-6-sol" | "gpt-6-luna" | "gpt-5.6" => &["fast"],
+            _ => &[],
+        },
+        _ => &[],
+    }
 }
 
 #[derive(Default)]
@@ -222,7 +243,7 @@ mod tests {
         let v = values("claude", home);
         let extra: Vec<(&str, &str)> = v[CLAUDE_MODELS.len()..].iter().map(|a| (a.value.as_str(), a.label.as_str())).collect();
         assert_eq!(extra, vec![("claude-opus-6-0", "Opus 6.0"), ("claude-haiku-5-6", "Haiku 5.6"), ("claude-fable-5-1[1m]", "Fable 5.1")], "a known id is listed once");
-        assert_eq!(v[0], Arg::new("claude-fable-5-2", "Fable 5.2"));
+        assert_eq!(v[0], Arg { value: "claude-fable-5-2".into(), label: "Fable 5.2".into(), tiers: &["fast"] });
     }
 
     #[test]
@@ -245,6 +266,24 @@ mod tests {
                 {"slug": "a", "display_name": "A", "visibility": "list", "priority": 1}]}"#,
         );
         assert_eq!(values("codex", t.path()), vec![Arg::new("a", "A"), Arg::new("b", "B")]);
+    }
+
+    #[test]
+    fn model_choices_expose_documented_tiers() {
+        let t = tempfile::tempdir().unwrap();
+        put(&t.path().join(".codex/models_cache.json"), r#"{"models":[
+            {"slug":"gpt-6.1-sol","display_name":"GPT-6.1 Sol","visibility":"list"},
+            {"slug":"gpt-6.1-terra","visibility":"list"},
+            {"slug":"custom","visibility":"list"}
+        ]}"#);
+        let v = serde_json::to_value(values("codex", t.path())).unwrap();
+        assert_eq!(v, serde_json::json!([
+            {"value":"gpt-6.1-sol","label":"GPT-6.1 Sol","tiers":["fast","ultrafast"]},
+            {"value":"gpt-6.1-terra","tiers":["fast"]},
+            {"value":"custom"}
+        ]));
+        assert_eq!(tiers("claude", "claude-fable-5-2"), &["fast"]);
+        assert!(tiers("claude", "claude-sonnet-5-5").is_empty());
     }
 
     #[test]
