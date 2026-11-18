@@ -9,6 +9,7 @@ mod agy;
 mod cursor;
 mod grok;
 mod pi;
+mod speed;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -26,6 +27,7 @@ use grok::GrokState;
 use pi::PiState;
 
 pub use crate::util::{cut, MAX_DETAIL};
+pub use speed::recent_output_speeds;
 
 /// Parses all lines in one go.
 pub fn parse_lines<S: AsRef<str>>(lines: &[S]) -> Vec<ConversationItem> {
@@ -119,6 +121,7 @@ pub struct ConversationParser {
     grok: GrokState, // Grok Build chunk merging (see grok.rs)
     queue: ClaudeQueueLog,
     codex_seq: u64,
+    speed: speed::SpeedLog,
 }
 
 impl ConversationParser {
@@ -160,6 +163,9 @@ impl ConversationParser {
                 item.clone()
             })
             .collect();
+        for (row, speed) in self.speed.rows() {
+            out[row].output_speed = Some(speed);
+        }
         let mut run = self.run.clone();
         let mut perm = None;
         if let Some(last) = self.open_order.last() {
@@ -202,28 +208,36 @@ impl ConversationParser {
         let Some(o) = json::parse_obj(line) else { return };
         self.line_ts = json::str_(o.get("timestamp")).and_then(parse_time);
         self.line_offset = offset;
-        if let Some((update, meta)) = grok::grok_update(&o) {
-            self.feed_grok(update, meta, &o, offset);
+        let first_new = self.done.len();
+        self.feed_object(&o, line, offset);
+        // A later block or token count can complete the measurement for an earlier text row.
+        let row = (first_new..self.done.len()).rfind(|&i| matches!(self.done[i].kind, ItemKind::AssistantText(_)));
+        self.speed.feed(&o, self.line_ts, row);
+    }
+
+    fn feed_object(&mut self, o: &Obj, line: &str, offset: Option<u64>) {
+        if let Some((update, meta)) = grok::grok_update(o) {
+            self.feed_grok(update, meta, o, offset);
             return;
         }
         if let Some(payload) = json::obj(o.get("payload")) {
             self.feed_codex(json::str_(o.get("type")), payload, offset);
             return;
         }
-        if agy::is_agy(&o) {
-            self.feed_agy(&o);
+        if agy::is_agy(o) {
+            self.feed_agy(o);
             return;
         }
         if !o.contains_key("uuid") {
             if let Some(t) = json::str_(o.get("type")) {
                 if pi::PI_TYPES.contains(&t) {
-                    self.feed_pi(&o, line, offset);
+                    self.feed_pi(o, line, offset);
                     return;
                 }
             }
         }
-        if cursor::is_cursor(&o) {
-            self.feed_cursor(&o, offset);
+        if cursor::is_cursor(o) {
+            self.feed_cursor(o, offset);
             return;
         }
         let ty = json::str_(o.get("type"));
@@ -233,11 +247,11 @@ impl ConversationParser {
             return;
         }
         if ty == Some("attachment") {
-            self.feed_queued(&o);
+            self.feed_queued(o);
             return;
         }
         if ty == Some("queue-operation") {
-            self.queue.feed(&o);
+            self.queue.feed(o);
             return;
         }
         if ty != Some("user") && ty != Some("assistant") {

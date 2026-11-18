@@ -26,6 +26,12 @@ pub struct FeedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<usize>,
     /// Where the item's pictures are in the log (`Hub.pictures(of:)` order). Only for items read with line offsets
     /// (`feed --pictures`: what `serve` asks for, and the mod for a terminal on this machine).
@@ -41,7 +47,7 @@ pub struct FeedRow {
 
 impl FeedRow {
     pub fn new(k: &str, id: &str, text: Option<String>, ts: Option<i64>) -> FeedRow {
-        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None }
+        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, output_tokens: None, seconds: None, tps: None, images: None, pics: None, chips: None, perm: None, question: None }
     }
 }
 
@@ -180,7 +186,7 @@ pub fn merged(items: &[ConversationItem]) -> Vec<ConversationItem> {
                 .iter()
                 .flat_map(|r| if let ItemKind::ToolChips(c) = &r.kind { c.clone() } else { vec![] })
                 .collect();
-            out.push(ConversationItem { id: first.id.clone(), kind: ItemKind::ToolChips(chips), timestamp: first.timestamp, images: vec![] });
+            out.push(ConversationItem { id: first.id.clone(), kind: ItemKind::ToolChips(chips), timestamp: first.timestamp, ..Default::default() });
         }
         run.clear();
     }
@@ -246,6 +252,11 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         }
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
+            if let Some(speed) = it.output_speed {
+                r.output_tokens = Some(speed.output_tokens);
+                r.seconds = speed.seconds;
+                r.tps = speed.tps;
+            }
             r.text = Some(cut(s, TEXT_CAP));
         }
         ItemKind::Status(s) => r.text = Some(s.clone()),

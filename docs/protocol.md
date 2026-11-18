@@ -369,7 +369,7 @@ such file, or another format.
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"1.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"2.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
@@ -431,13 +431,25 @@ heights by it.
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
 | | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve` and `pictures`. |
 | | `from` (a note from another agent) | One line, "↳ docs-worker: first line", that opens to the whole note. |
-| `assistant` | `text` (markdown), `ts` | Full-width markdown. |
+| `assistant` | `text` (markdown), `ts`, optional `output_tokens`, `seconds`, `tps` | Full-width markdown. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |
 | `question` | `question`, `ts` | The question card. |
 | `status` | `text` | A centered note ("Context compacted"). |
 | `sep` | `text` ("14:05", "Yesterday 09:12", "Mon 2 Nov 18:30") | A time separator. |
 | `footer` | `text` ("01:41 · Worked 36s · 3 tools") | The turn footer, under the turn's last row. |
+
+Claude Code and Codex assistant rows can carry end-to-end output speed. `output_tokens` is the
+answer's output token count. A Claude answer groups the blocks with the same `message.id` and
+uses its usage once. A Codex answer uses `last_token_usage.output_tokens` from `token_count`,
+including reasoning tokens. For an answer with multiple assistant rows, the last one carries
+the measurements. Calls without an assistant row can still count in `status`.
+
+`seconds` is the time from the prompt, tool result or start of the task to the answer's last
+log line, including the wait for the first token. Consecutive answers without an intervening
+prompt or tool result use the previous answer's last line as the start. `tps` is
+`output_tokens / seconds`. It is omitted for fewer than 50 output tokens, less than one
+second, or missing timing. Fields with unavailable data are omitted.
 
 A note from another agent is a message that is one `<hc from="t2 docs-worker">…</hc>`, as herdr-core's `hc send`
 types it. Its `user` row has `from` (the sender as hc wrote it: the terminal, then the name when it has one; `""`
@@ -473,8 +485,12 @@ approval is the `card` command's job.
 
 | Field | Meaning |
 |---|---|
-| `source` | `statusline` (herdr-contr's status line wrapper is on), `log` (the model and the context, from the log), `none`. |
-| `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`), `text`, `percent` (context only), `warn` (context 80% or more). With an auto-compact limit and the tokens known, the context `text` is `ctx 120k / 250k`, and `percent` and `warn` are against that limit. With source `log`, the context tag comes from the log's newest assistant usage: against the limit; with no limit, `ctx 12%` of the model's context window when the model id tells it (`[1m]`: 1,000,000 tokens); else no context tag. |
+| `source` | `statusline` (herdr-contr's status line wrapper is on), `log` (tags from the session log), `none`. |
+| `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`, `speed`), `text`, `percent` (context only), `warn` (context 80% or more). With an auto-compact limit and the tokens known, the context `text` is `ctx 120k / 250k`, and `percent` and `warn` are against that limit. With source `log`, the context tag comes from the log's newest assistant usage: against the limit; with no limit, `ctx 12%` of the model's context window when the model id tells it (`[1m]`: 1,000,000 tokens); else no context tag. |
+
+`speed` shows the median of the last five eligible answers in the session, or all eligible
+answers if there are fewer than five. Its `text` is rounded to a whole number, for example
+`58 tok/s`. It has `warn: false` and no `percent`. The tag is omitted until an answer has `tps`.
 
 The auto-compact limit: `modelSettings.<model>.autoCompactWindow` for the log's model, else the top-level
 `autoCompactWindow`. The helper reads Claude Code's settings files in its order: the agent's

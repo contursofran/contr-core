@@ -8,12 +8,13 @@ use herdr_core::statusline::{StatusLineFolder, StatusTag};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Tag {
-    /// "model", "effort", "context", "cost", "own".
+    /// "model", "effort", "context", "cost", "own", "speed".
     pub kind: String,
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,8 +150,9 @@ struct Line<'a> {
 /// user's Claude Code settings; `cwd`: the agent's folder, for the project's settings.
 pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>, out: &mut JsonLines, now: SystemTime) {
     let (mut tags, mut source): (Vec<Tag>, &str) = (vec![], "none");
-    let lines = log.and_then(|l| tail::read(l, None, 256 * 1024).ok()).map(|r| r.lines);
-    let model = lines.as_deref().and_then(tail::model);
+    let range = log.and_then(|l| tail::read(l, None, 256 * 1024).ok());
+    let lines = range.as_ref().map(|r| r.lines.as_slice());
+    let model = lines.and_then(tail::model);
     let limit = || compact_limit(&settings_files(settings, cwd), model.as_deref());
     if agent == "claude" {
         if let (Some(log), Some(dir)) = (log, folder(settings)) {
@@ -164,7 +166,7 @@ pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>,
         }
     }
     if tags.is_empty() {
-        if let Some(lines) = &lines {
+        if let Some(lines) = lines {
             if let Some(m) = &model {
                 tags = vec![Tag { kind: "model".into(), text: m.clone(), percent: None, warn: false }];
                 source = "log";
@@ -183,5 +185,35 @@ pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>,
             }
         }
     }
+    if matches!(agent, "claude" | "codex") {
+        if let Some(speed) = log.zip(range.as_ref()).and_then(|(path, range)| output_speed(path, range)) {
+            tags.push(Tag { kind: "speed".into(), text: format!("{:.0} tok/s", speed.round()), percent: None, warn: false });
+            if source == "none" {
+                source = "log";
+            }
+        }
+    }
     out.emit(&Line { t: "status", agent, source, tags });
+}
+
+fn output_speed(path: &Path, range: &tail::Range) -> Option<f64> {
+    use herdr_core::conversation::recent_output_speeds;
+
+    let mut speeds = recent_output_speeds(&range.lines);
+    if speeds.len() < 5 && range.start > 0 {
+        // Read more only when the usual status tail cannot supply five measurements.
+        if let Ok(file) = std::fs::File::open(path) {
+            let mut reader = BufReader::new(file.take(range.size));
+            let lines = std::iter::from_fn(|| {
+                let mut line = Vec::new();
+                reader.read_until(b'\n', &mut line).ok()?;
+                (line.last() == Some(&b'\n')).then(|| String::from_utf8_lossy(&line).into_owned())
+            });
+            speeds = recent_output_speeds(lines);
+        }
+    }
+    speeds.sort_unstable_by(f64::total_cmp);
+    let mid = speeds.len() / 2;
+    let upper = *speeds.get(mid)?;
+    Some(if speeds.len() % 2 == 0 { (speeds[mid - 1] + upper) / 2.0 } else { upper })
 }

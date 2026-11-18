@@ -14,6 +14,9 @@ use std::path::Path;
 /// The range parsed again on each growth stops growing here; then the sidecar starts a new 2 MB tail (splice 0).
 pub const MAX_SPAN: u64 = 8 * 1024 * 1024;
 
+// Refresh cached rows from before the output speed fields were added.
+const CURSOR_VERSION: &str = "2";
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct State {
     pub path: String,
@@ -24,7 +27,7 @@ pub struct State {
 
 impl State {
     pub fn cursor(&self) -> String {
-        format!("1.{}.{}.{}.{}", fnv1a(&self.path), self.start, self.size, fnv1a(&self.hashes.join(",")))
+        format!("{CURSOR_VERSION}.{}.{}.{}.{}", fnv1a(&self.path), self.start, self.size, fnv1a(&self.hashes.join(",")))
     }
 }
 
@@ -38,7 +41,7 @@ struct Cursor {
 
 fn parse(c: Option<&str>) -> Option<Cursor> {
     let p: Vec<&str> = c?.split('.').collect();
-    if p.len() != 5 || p[0] != "1" {
+    if p.len() != 5 || p[0] != CURSOR_VERSION {
         return None;
     }
     Some(Cursor { path_hash: p[1].into(), start: p[2].parse().ok()?, size: p[3].parse().ok()?, rows_hash: p[4].into() })
