@@ -34,7 +34,7 @@ Claude Code kit. The contr-desktop app and the agents use them.
 | `xplat/herdr-contr-feed` | core | the helper (Rust): reads the agents' session logs and talks to hc; its `install` puts the core in its root |
 | `xplat/herdr-core` | core | the helper's hc client, its parsers and `places` |
 | `xplat/herdr-contr-orch` | core | the orchestration tool (Rust), ported from contr slice by slice (#160); its parts are in the list below the table |
-| `kit`, `.claude-plugin/marketplace.json` | core | the Claude Code plugin of a coordinator and its workers: the agent definitions, the playbook (`commands/orchestrate.md`), the chat-writing skill, the hooks and the MCP server, which run `herdr-contr-orch`; `.claude-plugin/marketplace.json` at the root names it for Claude Code |
+| `kit`, `.claude-plugin/marketplace.json` | core | the Claude Code plugin, with agent definitions, the playbook, the chat-writing skill, hooks and the MCP server. Codex coordinators use the same playbook and MCP server through `herdr-contr-orch codex coordinator` |
 | `xplat/fixtures` | core | the session logs and hub answers that the helper's tests read |
 | `xplat/build-stamp.rs` | core | the build stamp of the helper and the tool |
 | `xplat/herdr-contr-feed/web` | core | the phone page that the helper embeds (built output; do not edit) |
@@ -54,7 +54,7 @@ The parts of `xplat/herdr-contr-orch`:
 - the MCP server with the coordinator's tools and a worker's `report` tool (`mcp`)
 - the reports held for a busy coordinator (`held`)
 - the limits of spawn and send: workers at once and open PRs (`limit`)
-- the hooks of a worker and of a coordinator (`hook stop`, `hook session-start`, `hook prompt`, `hook codex-question`)
+- the worker and coordinator hooks for Claude Code and Codex (`herdr-contr-orch hook --help`)
 - the check of a PR against the brief's boundary (`pr check-boundary`)
 
 ## Checks

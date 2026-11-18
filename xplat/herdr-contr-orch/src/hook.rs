@@ -26,6 +26,8 @@ pub const USAGE: &str = "Usage:
   herdr-contr-orch hook session-start   the kit's SessionStart hook (startup, resume, clear, compact)
   herdr-contr-orch hook prompt          the kit's UserPromptSubmit hook
   herdr-contr-orch hook codex-question  Codex's question PreToolUse hook
+  herdr-contr-orch hook codex-stop|codex-session-start|codex-prompt
+                                       the hooks of a Codex coordinator
 
 The agent gives the hook input on stdin.
 
@@ -70,6 +72,7 @@ the terminal come with it. It always exits 0.
 
 /// What the prompt hook adds to a prompt of the owner.
 pub const YOU_CONTEXT: &str = "contr: before you start, add each new request in this prompt to your todo list (TodoWrite or TaskCreate). Start the text of each such item with \"[you] \".";
+const CODEX_YOU_CONTEXT: &str = "contr: before you start, track each new request in this prompt with the Codex plan tool. Start the text of each such item with \"[you] \".";
 
 /// The context size, in tokens, from which a coordinator is asked to save its state: below the owner's
 /// compaction window.
@@ -94,15 +97,21 @@ pub const SAID_MAX: usize = 300;
 #[serde(default)]
 struct Input {
     session_id: String,
+    #[serde(deserialize_with = "null_string")]
     transcript_path: String,
     cwd: String,
     /// Newer Claude Code versions give it.
+    #[serde(deserialize_with = "null_string")]
     last_assistant_message: String,
     stop_hook_active: bool,
     /// SessionStart: startup, resume, clear or compact.
     source: String,
     /// The session's effort level. Claude Code leaves it out for a model with no effort setting.
     effort: Option<Effort>,
+}
+
+fn null_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Default, Deserialize)]
@@ -118,15 +127,22 @@ pub fn run(args: &[String], env: &dyn Fn(&str) -> String, input: &mut dyn BufRea
         crate::codex::question_hook(env, input, core);
         return 0;
     }
-    if args.len() == 1 && args[0] == "prompt" {
-        if let Err(e) = prompt(env, input, out, err, core) {
+    let (name, codex) = match args {
+        [name] if matches!(name.as_str(), "stop" | "session-start" | "prompt") => (name.as_str(), false),
+        [name] if matches!(name.as_str(), "codex-stop" | "codex-session-start" | "codex-prompt") => (&name[6..], true),
+        _ => {
+            let _ = err.write_all(USAGE.as_bytes());
+            return 1;
+        }
+    };
+    if codex && !crate::codex::is_coordinator(env) {
+        return 0;
+    }
+    if name == "prompt" {
+        if let Err(e) = prompt(env, input, out, err, core, codex) {
             let _ = writeln!(err, "herdr-contr-orch hook prompt: {e}");
         }
         return 0;
-    }
-    if args.len() != 1 || (args[0] != "stop" && args[0] != "session-start") {
-        let _ = err.write_all(USAGE.as_bytes());
-        return 1;
     }
     // Outside hc there are no workers and no coordinators.
     if env(ENV_COORDINATOR).is_empty() && env("HC_TERMINAL_ID").is_empty() {
@@ -140,16 +156,18 @@ pub fn run(args: &[String], env: &dyn Fn(&str) -> String, input: &mut dyn BufRea
             return 1;
         }
     };
-    let h = Hook { input: hook_input, env, core };
-    let done = if args[0] == "session-start" {
-        if !env("HC_TERMINAL_ID").is_empty() {
+    let h = Hook { input: hook_input, env, core, codex };
+    let done = if name == "session-start" {
+        if !codex && !env("HC_TERMINAL_ID").is_empty() {
             let _ = out.write_all(CHAT_SKILL_LINE.as_bytes());
         }
         // The session starts with the flow that it has now.
         if let Err(e) = flowseen::record(env, &env("HC_TERMINAL_ID")) {
             let _ = writeln!(err, "herdr-contr-orch hook: record flow: {e}");
         }
-        h.session_start(out)
+        if codex { h.codex_start(out) } else { h.session_start(out) }
+    } else if codex && h.input.stop_hook_active {
+        Ok(())
     } else if !env(ENV_COORDINATOR).is_empty() {
         worker_stop(&h.input, env, core)
     } else {
@@ -163,7 +181,7 @@ pub fn run(args: &[String], env: &dyn Fn(&str) -> String, input: &mut dyn BufRea
             let _ = writeln!(err, "herdr-contr-orch hook: due: {e}");
             false
         });
-        if gave { Ok(()) } else { h.coordinator_stop(out) }
+        if gave || codex { Ok(()) } else { h.coordinator_stop(out) }
     };
     match done {
         Ok(()) => 0,
@@ -212,12 +230,12 @@ fn without_blocks(text: &str, name: &str) -> String {
 
 /// The UserPromptSubmit hook: the todo line for a prompt of the owner, and the flow when it changed. A
 /// worker's prompts come from the coordinator, and a worker is never a coordinator: it gets no context.
-fn prompt(env: &dyn Fn(&str) -> String, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write, core: &dyn Core) -> Result<(), String> {
+fn prompt(env: &dyn Fn(&str) -> String, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write, core: &dyn Core, codex: bool) -> Result<(), String> {
     let id = env("HC_TERMINAL_ID");
     if id.is_empty() || !env(ENV_COORDINATOR).is_empty() {
         return Ok(());
     }
-    let flow = flowseen::change(env, core, &id).unwrap_or_else(|e| {
+    let flow = flowseen::change(env, core, &id, codex).unwrap_or_else(|e| {
         let _ = writeln!(err, "herdr-contr-orch hook prompt: flow: {e}");
         String::new()
     });
@@ -231,7 +249,7 @@ fn prompt(env: &dyn Fn(&str) -> String, input: &mut dyn BufRead, out: &mut dyn W
     });
     let mut parts = Vec::new();
     if owner_words(asked) {
-        parts.push(YOU_CONTEXT);
+        parts.push(if codex { CODEX_YOU_CONTEXT } else { YOU_CONTEXT });
     }
     if !flow.is_empty() {
         parts.push(&flow);
@@ -300,6 +318,7 @@ struct Hook<'a> {
     input: Input,
     env: &'a dyn Fn(&str) -> String,
     core: &'a dyn Core,
+    codex: bool,
 }
 
 /// The family word of a model: "opus" for "claude-opus-5-5". A model with no known family gives its id.
@@ -341,7 +360,7 @@ impl Hook<'_> {
         if text.is_empty() {
             return Ok(false);
         }
-        writeln!(out, "{}", json!({"decision": "block", "reason": text})).map_err(|e| e.to_string())?;
+        self.continue_turn(out, text)?;
         Ok(true)
     }
 
@@ -353,8 +372,14 @@ impl Hook<'_> {
         if text.is_empty() {
             return Ok(false);
         }
-        writeln!(out, "{}", json!({"decision": "block", "reason": text})).map_err(|e| e.to_string())?;
+        self.continue_turn(out, text)?;
         Ok(true)
+    }
+
+    fn continue_turn(&self, out: &mut dyn Write, reason: String) -> Result<(), String> {
+        // Codex feeds the reason back as a prompt. The prompt hook must not treat it as an owner's request.
+        let reason = if self.codex { format!("<system-reminder>\n{reason}\n</system-reminder>") } else { reason };
+        writeln!(out, "{}", json!({"decision": "block", "reason": reason})).map_err(|e| e.to_string())
     }
 
     /// Asks a coordinator, one time for each compaction, to save its state when the context comes near the
@@ -409,6 +434,14 @@ impl Hook<'_> {
             _ => return Ok(()),
         };
         out.write_all(text.as_bytes()).map_err(|e| e.to_string())
+    }
+
+    fn codex_start(&self, out: &mut dyn Write) -> Result<(), String> {
+        let _ = self.core.call("terminal.label", json!({"terminal": self.terminal(), "labels": {(LABEL_ORCHESTRATING): "1"}}));
+        let text = if self.input.source == "compact" { self.restore_text() } else { self.startup_text() };
+        let chat_skill = PathBuf::from((self.env)("CONTR_KIT")).join("skills/chat-writing/SKILL.md");
+        let context = format!("contr: before you write an answer, read {} for the chat format.\n\n{text}", chat_skill.display());
+        writeln!(out, "{}", json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})).map_err(|e| e.to_string())
     }
 
     /// The model and effort labels of the session: the short name of the transcript's model, and the effort
@@ -494,16 +527,20 @@ impl Hook<'_> {
     /// items, the flow and the playbook, cut to RESTORE_MAX characters.
     fn restore_text(&self) -> String {
         let state = Path::new(&self.input.cwd).join(STATE_FILE);
-        let head = format!(
-            "contr: the conversation was compacted. You are the coordinator, and the playbook follows again.\nFirst read {}: you wrote it before the compaction.\n",
-            state.display()
-        );
+        let mut head = String::from("contr: the conversation was compacted. You are the coordinator, and the playbook follows again.\n");
+        if !self.codex || state.is_file() {
+            head += &format!("First read {}: you wrote it before the compaction.\n", state.display());
+        }
         self.with_lists(head)
     }
 
     /// What a new coordinator gets: as `restore_text`, with the state file only when there is one.
     fn startup_text(&self) -> String {
-        let mut head = String::from("contr: you are the coordinator of this project; the owner gives the goal in the next message.\n");
+        let mut head = if self.codex {
+            String::from("contr: you are the coordinator of this project. Use the owner's goal or continue the current goal on resume.\n")
+        } else {
+            String::from("contr: you are the coordinator of this project; the owner gives the goal in the next message.\n")
+        };
         let state = Path::new(&self.input.cwd).join(STATE_FILE);
         if state.exists() {
             head += &format!("First read {}: an earlier coordinator of this project wrote it.\n", state.display());
@@ -513,16 +550,21 @@ impl Hook<'_> {
 
     /// The lists come before the playbook, so a cut takes only playbook text.
     fn with_lists(&self, head: String) -> String {
-        cut(format!("{head}\n{}\n{}\n{}\nThe playbook:\n\n{}", self.workers_text(), self.owner_text(), flow_text(self.env), self.playbook()), RESTORE_MAX)
+        let text = format!("{head}\n{}\n{}\n{}\nThe playbook:\n\n{}", self.workers_text(), self.owner_text(), flow_text(self.env), self.playbook());
+        if self.codex { text } else { cut(text, RESTORE_MAX) }
     }
 
     /// The body of the kit's orchestrate command, without its front matter. The goal is in the state file.
     fn playbook(&self) -> String {
-        let mut kit = (self.env)("CLAUDE_PLUGIN_ROOT");
+        let mut kit = if self.codex { String::new() } else { (self.env)("CLAUDE_PLUGIN_ROOT") };
         if kit.is_empty() {
             kit = (self.env)("CONTR_KIT");
         }
-        let fail = |why: String| format!("The playbook could not be read ({why}). Run /{ORCHESTRATE_COMMAND} with your goal to read it again.");
+        let fail = |why: String| if self.codex {
+            format!("The playbook could not be read ({why}). Read commands/orchestrate.md in the installed kit.")
+        } else {
+            format!("The playbook could not be read ({why}). Run /{ORCHESTRATE_COMMAND} with your goal to read it again.")
+        };
         if kit.is_empty() {
             return fail("no kit folder".into());
         }
@@ -531,7 +573,8 @@ impl Hook<'_> {
             Err(e) => return fail(e.to_string()),
         };
         let body = body.strip_prefix("---\n").and_then(|rest| rest.split_once("\n---\n")).map_or(body.as_str(), |(_, after)| after);
-        body.replace("$ARGUMENTS", "(see the state file)").trim().to_string()
+        let goal = if self.codex { "(use the owner's goal or read the state file)" } else { "(see the state file)" };
+        body.replace("$ARGUMENTS", goal).trim().to_string()
     }
 
     /// The live workers that this coordinator started.

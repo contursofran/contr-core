@@ -125,7 +125,7 @@ fn backend_install_writes_no_mod_file() {
     let orch = s.orch();
     let r = s.run_backend(&["--helper", s.helper.to_str().unwrap(), "--orch", orch.to_str().unwrap()], &[("CONTR_HOME", &r_dir)]);
     assert_eq!(r.status.code(), Some(0), "{}", both(&r));
-    for f in ["kit/.claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "bin/herdr-contr-feed", "bin/herdr-contr-orch"] {
+    for f in ["kit/.claude-plugin/plugin.json", "kit/commands/orchestrate.md", ".claude-plugin/marketplace.json", "bin/herdr-contr-feed", "bin/herdr-contr-orch"] {
         assert!(r_dir.join(f).is_file(), "{f} is missing: {}", out(&r));
     }
     assert_eq!(read(r_dir.join("bin/herdr-contr-orch")), "#!/bin/sh\necho orch\n");

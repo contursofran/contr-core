@@ -170,3 +170,75 @@ fn invalid_hook_files_are_never_rewritten() {
         }
     }
 }
+
+#[test]
+fn coordinator_hooks_are_independent_and_can_repair_partial_setup() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hooks.json");
+    let toggle = |action| call(&["codex", "hooks", "coordinator", action, "--file", path(&file)], &[], &Fake::default());
+    let read = || serde_json::from_slice::<Value>(&fs::read(&file).unwrap()).unwrap();
+    assert!(toggle("status").out.contains("coordinator hooks: off"));
+    let original = json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]}});
+    fs::write(&file, original.to_string()).unwrap();
+    // Both sets can be installed at the same time without losing one set.
+    std::thread::scope(|s| {
+        let question = s.spawn(|| hooks("on", &file));
+        assert!(toggle("on").out.contains("coordinator hooks: on"));
+        status(question.join().unwrap(), "on");
+    });
+    let mut added = read();
+    assert_eq!(added["hooks"]["Stop"][0], original["hooks"]["Stop"][0]);
+    assert!(added["hooks"]["SessionStart"][0]["matcher"].as_str().unwrap().contains("compact"));
+    for (event, sub) in [("Stop", "codex-stop"), ("UserPromptSubmit", "codex-prompt"), ("SessionStart", "codex-session-start")] {
+        let group = added["hooks"][event].as_array().unwrap().last().unwrap();
+        assert!(group["hooks"][0]["command"].as_str().unwrap().contains(&format!("hook {sub} ")));
+    }
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(toggle("on").code, 0);
+    assert_eq!(fs::read(&file).unwrap(), bytes);
+    added["hooks"]["UserPromptSubmit"] = json!([]);
+    fs::write(&file, added.to_string()).unwrap();
+    assert!(toggle("status").out.contains("coordinator hooks: partial"));
+    assert!(toggle("on").out.contains("coordinator hooks: on"));
+    assert!(toggle("off").out.contains("coordinator hooks: off"));
+    assert_eq!(read()["hooks"]["Stop"], original["hooks"]["Stop"]);
+    status(hooks("status", &file), "on");
+
+    let invalid = r#"{"hooks":{"Stop":false}}"#;
+    fs::write(&file, invalid).unwrap();
+    assert_eq!(toggle("on").code, 1);
+    assert_eq!(fs::read_to_string(&file).unwrap(), invalid);
+}
+
+#[cfg(unix)]
+#[test]
+fn coordinator_launch_passes_the_full_mcp_server_and_codex_arguments() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let kit = root.join("kit");
+    fs::create_dir_all(kit.join("commands")).unwrap();
+    fs::write(kit.join("commands/orchestrate.md"), "The playbook").unwrap();
+    let codex = root.join("codex");
+    fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$CONTR_CODEX_COORDINATOR\" \"$CONTR_KIT\" \"$@\"\nexit 7\n").unwrap();
+    fs::set_permissions(&codex, fs::Permissions::from_mode(0o755)).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_herdr-contr-orch"))
+        .env_clear().env("PATH", root).env("CONTR_HOME", root).env("HC_TERMINAL_ID", "t1")
+        .args(["codex", "coordinator", "resume", "--last", "--model", "gpt-6.2-sol"]).output().unwrap();
+    assert_eq!(result.status.code(), Some(7), "{:?}", String::from_utf8_lossy(&result.stderr));
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(&lines[..2], &["1", path(&kit)]);
+    assert_eq!(&lines[lines.len() - 4..], &["resume", "--last", "--model", "gpt-6.2-sol"]);
+    for part in ["mcp_servers.contr.args=[\"mcp\"]", "mcp_servers.contr.disabled_tools=[]", "\"spawn\"", "\"stop\"", "\"message\"", "\"ask_owner\"", "\"owner_items\"", "\"HC_TERMINAL_ID\"", "\"CONTR_KIT\""] {
+        assert!(stdout.contains(part), "missing {part} in {stdout}");
+    }
+
+    let fake = Fake::default();
+    for vars in [&[][..], &[("HC_TERMINAL_ID", "t1"), ("CONTR_COORDINATOR", "t2")][..]] {
+        assert!(call(&["codex", "coordinator"], vars, &fake).err.contains("own hc terminal"));
+    }
+    assert_eq!(call(&["codex", "coordinator"], &[("HC_TERMINAL_ID", "t1"), ("CONTR_HOME", path(root)), ("CONTR_KIT", "missing")], &fake).code, 1);
+}

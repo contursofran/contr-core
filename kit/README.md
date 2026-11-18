@@ -50,6 +50,28 @@ and give the repository's `kit` folder to `--plugin-dir`.
 
 For shell use (`herdr-contr-orch agents …`), put the tool on the PATH.
 
+## Codex coordinator
+
+Use Codex CLI 0.169 or later. Run `herdr-contr-orch codex hooks coordinator on`
+once to add the coordinator hooks to `$CODEX_HOME/hooks.json` or
+`~/.codex/hooks.json`. In the project's hc terminal, start
+`herdr-contr-orch codex coordinator`. Pass Codex arguments after `coordinator`
+to select a model or resume a session. Open `/hooks` and trust the new entries
+before giving the goal. The launch command enables all contr MCP tools for this
+session.
+
+SessionStart loads the installed coordinator playbook, live workers, and open
+owner items at startup and after compaction. Stop delivers held reports and due
+to-dos. UserPromptSubmit picks up new owner requests, changes to the flow, and
+held reports. Codex uses its own compaction and the coordinator saves state
+when needed. The context-size warning before compaction is specific to Claude
+Code. Codex coordinators inspect screenshots directly with the image viewer.
+
+Use `herdr-contr-orch codex hooks coordinator status` to check the entries and
+`herdr-contr-orch codex hooks coordinator off` to remove them. The coordinator
+hooks run only in sessions started by the launch command. The Codex question
+hook for workers is configured separately.
+
 ## Codex question hook
 
 Run `herdr-contr-orch codex hooks on` with the installed tool.

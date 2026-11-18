@@ -9,7 +9,7 @@ them. `AGENTS.md` has the rules and the layout of the repository.
 | `xplat/herdr-contr-feed` | the helper: reads the agents' session logs and talks to hc |
 | `xplat/herdr-core` | the helper's hc client and conversation parsers |
 | `xplat/herdr-contr-orch` | the orchestration tool: the profiles and the flow of the workers, the owner file |
-| `kit/`, `.claude-plugin/marketplace.json` | the Claude Code plugin `contr` |
+| `kit/`, `.claude-plugin/marketplace.json` | the Claude Code plugin `contr` and the [Codex coordinator playbook](kit/README.md#codex-coordinator) |
 | `web/` | the source of the phone page that the helper embeds |
 
 The helper's contract (JSON Lines) is in [docs/protocol.md](docs/protocol.md).
