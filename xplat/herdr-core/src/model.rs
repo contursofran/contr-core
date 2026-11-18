@@ -294,6 +294,13 @@ impl Default for ItemKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutputSpeed {
+    pub output_tokens: u64,
+    pub seconds: Option<f64>,
+    pub tps: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ConversationItem {
     pub id: String,
@@ -302,11 +309,12 @@ pub struct ConversationItem {
     pub timestamp: Option<f64>,
     /// userText: the pictures the owner attached, in order.
     pub images: Vec<ImageRef>,
+    pub output_speed: Option<OutputSpeed>,
 }
 
 impl ConversationItem {
     /// An item without pictures.
     pub fn new(id: &str, kind: ItemKind, timestamp: Option<f64>) -> Self {
-        ConversationItem { id: id.into(), kind, timestamp, images: Vec::new() }
+        ConversationItem { id: id.into(), kind, timestamp, images: Vec::new(), output_speed: None }
     }
 }

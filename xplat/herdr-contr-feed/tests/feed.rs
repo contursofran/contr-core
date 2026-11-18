@@ -416,3 +416,125 @@ fn pictures_only_when_asked() {
     assert_eq!((p.format, p.width, p.height, p.offset, p.index), ("png", 3, 4, pre.len() as u64 + 2, 0), "the line after an empty one");
     assert_eq!(p.digest.len(), 16);
 }
+
+const SPEED_CLAUDE: &str = include_str!("../../fixtures/output-speed-claude.jsonl");
+const SPEED_CODEX: &str = include_str!("../../fixtures/output-speed-codex.jsonl");
+
+fn speed_tag(agent: &str, path: &std::path::Path) -> Option<serde_json::Value> {
+    let mut out = JsonLines::new();
+    status::run(agent, Some(path), &path.with_extension("settings.json"), None, None, &mut out, SystemTime::now());
+    let line: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+    line["tags"].as_array().unwrap().iter().find(|t| t["kind"] == "speed").cloned()
+}
+
+fn assistant_rows(out: &JsonLines) -> Vec<serde_json::Value> {
+    out.lines.iter().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .filter(|r| r["k"] == "assistant").collect()
+}
+
+#[test]
+fn claude_output_speed_patches_the_text_when_the_last_block_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.jsonl");
+    let third_block = SPEED_CLAUDE.lines().take(3).map(|l| l.len() + 1).sum::<usize>();
+    std::fs::write(&path, &SPEED_CLAUDE[..third_block]).unwrap();
+    let mut out = JsonLines::new();
+    let state = feed::run(Some(&path), "claude", None, None, false, &mut out, &now(), &Utc).unwrap().unwrap();
+    let before = assistant_rows(&out);
+    assert_eq!(before[0]["tps"], 120.0);
+
+    let legacy_cursor = state.cursor().replacen("2.", "1.", 1);
+    let mut out = JsonLines::new();
+    feed::run(Some(&path), "claude", Some(&legacy_cursor), Some(&state), false, &mut out, &now(), &Utc).unwrap();
+    assert_eq!(assistant_rows(&out), before, "a cursor from before the speed fields refreshes the rows");
+
+    std::fs::write(&path, SPEED_CLAUDE).unwrap();
+    let mut out = JsonLines::new();
+    feed::run(Some(&path), "claude", Some(&state.cursor()), Some(&state), false, &mut out, &now(), &Utc).unwrap();
+    let after = assistant_rows(&out);
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[0]["id"], before[0]["id"]);
+    assert_eq!(after[0]["output_tokens"], 240);
+    assert_eq!(after[0]["seconds"], 4.0);
+    assert_eq!(after[0]["tps"], 60.0);
+    for (row, tokens, seconds) in [(&after[1], 10, 2.0), (&after[2], 60, 0.5)] {
+        assert_eq!(row["output_tokens"], tokens);
+        assert_eq!(row["seconds"], seconds);
+        assert!(row.get("tps").is_none());
+    }
+    assert_eq!(speed_tag("claude", &path).unwrap()["text"], "60 tok/s");
+}
+
+#[test]
+fn codex_output_speed_counts_tool_only_answers_in_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    let mut lines: Vec<_> = SPEED_CODEX.lines().map(str::to_owned).collect();
+    // A rate limit update after the tool result repeats the first call's token usage.
+    lines.insert(7, lines[5].replace("16:00:02.250", "16:00:10.500"));
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let mut out = JsonLines::new();
+    feed::older(&path, std::fs::metadata(&path).unwrap().len(), true, &mut out, &now(), &Utc).unwrap();
+    let replies = assistant_rows(&out);
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0]["output_tokens"], 100);
+    assert_eq!(replies[0]["seconds"], 2.0);
+    assert_eq!(replies[0]["tps"], 50.0);
+    assert_eq!(speed_tag("codex", &path).unwrap(), serde_json::json!({"kind":"speed","text":"53 tok/s","warn":false}));
+}
+
+#[test]
+fn status_reports_speed_and_tier_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    std::fs::write(&path, SPEED_CODEX).unwrap();
+    let mut out = JsonLines::new();
+    status::run("codex", Some(&path), &path.with_extension("settings.json"), None, Some("ultrafast".into()), &mut out, SystemTime::now());
+    let line: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+    let tags = line["tags"].as_array().unwrap();
+    assert!(tags.contains(&serde_json::json!({"kind":"speed","text":"53 tok/s","warn":false})));
+    assert!(tags.contains(&serde_json::json!({"kind":"tier","text":"ultrafast","warn":false})));
+}
+
+#[test]
+fn status_output_speed_uses_only_the_last_five_eligible_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.jsonl");
+    let lines: Vec<_> = SPEED_CLAUDE.lines().collect();
+    // With no preceding prompt in the log, the token count is valid but timing is unavailable.
+    std::fs::write(&path, format!("{}\n", lines[2])).unwrap();
+    assert!(speed_tag("claude", &path).is_none());
+    let mut out = JsonLines::new();
+    feed::run(Some(&path), "claude", None, None, false, &mut out, &now(), &Utc).unwrap();
+    let replies = assistant_rows(&out);
+    assert_eq!(replies[0]["output_tokens"], 240);
+    assert!(replies[0].get("seconds").is_none());
+    assert!(replies[0].get("tps").is_none());
+
+    let mut log = String::new();
+    for (i, tokens) in [400, 800, 100, 104, 108, 112, 116, 15].into_iter().enumerate() {
+        let reply = lines[2].replace("msg_01Yh7Jx8WRDq4FMwp5Pr6A6D", &format!("msg_{i}"))
+            .replace("\"output_tokens\":240", &format!("\"output_tokens\":{tokens}"));
+        log.push_str(&format!("{}\n{reply}\n", lines[0]));
+    }
+    // The last five answers with a rate straddle the usual status tail.
+    log.push_str(&format!("{{\"type\":\"attachment\",\"padding\":\"{}\"}}\n", "x".repeat(256 * 1024)));
+    log.push_str(lines[2]); // No newline yet.
+    std::fs::write(&path, log).unwrap();
+    assert_eq!(speed_tag("claude", &path).unwrap()["text"], "54 tok/s");
+    assert!(speed_tag("pi", &path).is_none());
+}
+
+#[test]
+fn status_output_speed_only_reads_the_last_four_mib() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.jsonl");
+    let mut log = std::fs::File::create(&path).unwrap();
+    log.write_all(SPEED_CLAUDE.as_bytes()).unwrap();
+    writeln!(log, "{{\"type\":\"attachment\",\"padding\":\"{}\"}}", "x".repeat(4 * 1024 * 1024)).unwrap();
+    assert!(speed_tag("claude", &path).is_none(), "the answer is outside the 4 MiB tail");
+
+    log.write_all(SPEED_CLAUDE.as_bytes()).unwrap();
+    writeln!(log, "{{\"type\":\"attachment\",\"padding\":\"{}\"}}", "x".repeat(256 * 1024)).unwrap();
+    assert_eq!(speed_tag("claude", &path).unwrap()["text"], "60 tok/s", "the answer is in the 4 MiB tail");
+}
