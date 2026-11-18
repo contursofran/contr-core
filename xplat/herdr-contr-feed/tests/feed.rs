@@ -511,3 +511,17 @@ fn status_output_speed_uses_only_the_last_five_eligible_answers() {
     assert_eq!(speed_tag("claude", &path).unwrap()["text"], "54 tok/s");
     assert!(speed_tag("pi", &path).is_none());
 }
+
+#[test]
+fn status_output_speed_only_reads_the_last_four_mib() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.jsonl");
+    let mut log = std::fs::File::create(&path).unwrap();
+    log.write_all(SPEED_CLAUDE.as_bytes()).unwrap();
+    writeln!(log, "{{\"type\":\"attachment\",\"padding\":\"{}\"}}", "x".repeat(4 * 1024 * 1024)).unwrap();
+    assert!(speed_tag("claude", &path).is_none(), "the answer is outside the 4 MiB tail");
+
+    log.write_all(SPEED_CLAUDE.as_bytes()).unwrap();
+    writeln!(log, "{{\"type\":\"attachment\",\"padding\":\"{}\"}}", "x".repeat(256 * 1024)).unwrap();
+    assert_eq!(speed_tag("claude", &path).unwrap()["text"], "60 tok/s", "the answer is in the 4 MiB tail");
+}

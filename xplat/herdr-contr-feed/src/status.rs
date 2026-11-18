@@ -8,7 +8,6 @@ use herdr_core::statusline::{StatusLineFolder, StatusTag};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -201,15 +200,9 @@ fn output_speed(path: &Path, range: &tail::Range) -> Option<f64> {
 
     let mut speeds = recent_output_speeds(&range.lines);
     if speeds.len() < 5 && range.start > 0 {
-        // Read more only when the usual status tail cannot supply five measurements.
-        if let Ok(file) = std::fs::File::open(path) {
-            let mut reader = BufReader::new(file.take(range.size));
-            let lines = std::iter::from_fn(|| {
-                let mut line = Vec::new();
-                reader.read_until(b'\n', &mut line).ok()?;
-                (line.last() == Some(&b'\n')).then(|| String::from_utf8_lossy(&line).into_owned())
-            });
-            speeds = recent_output_speeds(lines);
+        // Status is polled often. Limit the search for older answers to the last 4 MiB.
+        if let Ok(older_tail) = tail::read(path, None, 4 * 1024 * 1024) {
+            speeds = recent_output_speeds(&older_tail.lines);
         }
     }
     speeds.sort_unstable_by(f64::total_cmp);

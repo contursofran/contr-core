@@ -488,9 +488,10 @@ approval is the `card` command's job.
 | `source` | `statusline` (herdr-contr's status line wrapper is on), `log` (tags from the session log), `none`. |
 | `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`, `speed`), `text`, `percent` (context only), `warn` (context 80% or more). With an auto-compact limit and the tokens known, the context `text` is `ctx 120k / 250k`, and `percent` and `warn` are against that limit. With source `log`, the context tag comes from the log's newest assistant usage: against the limit; with no limit, `ctx 12%` of the model's context window when the model id tells it (`[1m]`: 1,000,000 tokens); else no context tag. |
 
-`speed` shows the median of the last five eligible answers in the session, or all eligible
-answers if there are fewer than five. Its `text` is rounded to a whole number, for example
-`58 tok/s`. It has `warn: false` and no `percent`. The tag is omitted until an answer has `tps`.
+`speed` shows the median of up to five eligible answers, newest first. The helper reads the
+last 256 KiB of the log first. If that gives fewer than five measurements, it searches up to
+the last 4 MiB. Its `text` is rounded to a whole number, for example `58 tok/s`. It has
+`warn: false` and no `percent`. The tag is omitted when the search finds no answer with `tps`.
 
 The auto-compact limit: `modelSettings.<model>.autoCompactWindow` for the log's model, else the top-level
 `autoCompactWindow`. The helper reads Claude Code's settings files in its order: the agent's
