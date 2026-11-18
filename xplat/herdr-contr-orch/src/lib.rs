@@ -4,6 +4,7 @@
 //! The files and their places are the same as contr's, so both tools read the same state during the port.
 pub mod boundary;
 pub mod cli;
+mod codex;
 pub mod config;
 pub mod due;
 pub mod flowseen;

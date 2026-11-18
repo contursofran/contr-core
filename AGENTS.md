@@ -54,7 +54,7 @@ The parts of `xplat/herdr-contr-orch`:
 - the MCP server with the coordinator's tools and a worker's `report` tool (`mcp`)
 - the reports held for a busy coordinator (`held`)
 - the limits of spawn and send: workers at once and open PRs (`limit`)
-- the hooks of a worker and of a coordinator (`hook stop`, `hook session-start`, `hook prompt`)
+- the hooks of a worker and of a coordinator (`hook stop`, `hook session-start`, `hook prompt`, `hook codex-question`)
 - the check of a PR against the brief's boundary (`pr check-boundary`)
 
 ## Checks
@@ -66,7 +66,7 @@ The parts of `xplat/herdr-contr-orch`:
 ## Design rules (lessons from contr)
 
 - **Data comes from hooks, session logs and APIs, not from the screen.** A
-  new feature takes its data from a Claude Code hook, the session log, hc's
+  new feature takes its data from an agent hook, the session log, hc's
   API or the orchestration tool. Terminal text is only for the guard that
   checks the prompt before a key goes out.
 - **One inbox.** All that needs the owner is in one list, with one policy

@@ -36,6 +36,7 @@ Control them with the contr tools of this plugin: `spawn`, `set_title`, `message
   Name workers by role and issue (`b-158`, `r-158`).
 - **Reports:** you started the worker from your terminal, so it gets your address as `CONTR_COORDINATOR` and reports with the `report` tool (or `hc send`): a line `<name>: <status>, …; RESULT.md in <worktree>` arrives in this session.
   Read RESULT.md then.
+  A Codex worker's question arrives as a report, and `message` answers it.
   When hc cannot type a report because your prompt is busy (such as with a question dialog), contr keeps it and gives it to you when your turn ends, or with your next prompt, after the line `contr: these reports waited for you (not urgent, or your prompt was busy):`.
   Only urgent reports (blocked, failed, error, a question, failed CI, a PR merged or closed) come at once; others come together at most every `report_batch_minutes` (agents.json, default 10), or with the next urgent one.
   A turn that ends without one still reaches you, from the kit's Stop hook: `<hc from="<address> <name>">ended its turn without a report. Last words: …</hc>`; read its screen or RESULT.md then.

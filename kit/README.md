@@ -50,6 +50,18 @@ and give the repository's `kit` folder to `--plugin-dir`.
 
 For shell use (`herdr-contr-orch agents …`), put the tool on the PATH.
 
+## Codex question hook
+
+Run `herdr-contr-orch codex hooks on` with the installed tool.
+In Codex, open `/hooks` and trust the hook once after you add or change it.
+The hook sends a worker's question to its coordinator as a report.
+The coordinator answers with `message`.
+
+Use `herdr-contr-orch codex hooks status` to check the setting and
+`herdr-contr-orch codex hooks off` to remove the entry.
+These commands use `$CODEX_HOME/hooks.json` or `~/.codex/hooks.json`.
+Use `--file <hooks.json>` to select a different file.
+
 ## Use
 
 1. Point `herdr-contr-orch agents` at this folder: set `CONTR_KIT` to its path, or put
@@ -62,8 +74,8 @@ For shell use (`herdr-contr-orch agents …`), put the tool on the PATH.
    tool's MCP server (`codex -c mcp_servers.contr.… `), unless its argv sets
    `mcp_servers.contr` already, and the text of its agent file comes before
    its task. `agents set` changes its `--model` and its
-   `-c model_reasoning_effort=`. The hooks and `agents resume` are for
-   claude only.
+   `-c model_reasoning_effort=`. See Codex question hook above.
+   `agents resume` is for Claude Code.
    A variant names
    its agent: `"planner-high": {"argv": ["claude", "--model", "opus",
    "--effort", "high"], "agent": "planner"}`. The `spawn` tool reads the
