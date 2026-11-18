@@ -143,7 +143,7 @@ fn the_wrapper_record_gives_status_the_context_of_a_model_with_no_limit() {
     let log = t.path().join("fable-1.jsonl");
     std::fs::write(&log, "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-fable-5-2\",\"role\":\"assistant\",\"content\":[]}}\n").unwrap();
     let mut out = JsonLines::new();
-    crate::status::run("claude", Some(&log), &s, None, &mut out, SystemTime::now());
+    crate::status::run("claude", Some(&log), &s, None, None, &mut out, SystemTime::now());
     let line: Value = serde_json::from_str(out.text().lines().last().unwrap()).unwrap();
     assert_eq!(line["source"], "statusline");
     let ctx = line["tags"].as_array().unwrap().iter().find(|t| t["kind"] == "context").unwrap();

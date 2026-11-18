@@ -22,7 +22,7 @@ fn run(sock: &str, args: &[&str]) -> Vec<Value> {
 fn protocol_lines() {
     let v = run("/nonexistent.sock", &["version"]);
     assert_eq!(v[0], serde_json::json!({"type":"header","protocol":1,"sidecar":"0.1.0","build":env!("HERDR_CONTR_BUILD"),"cmd":"version"}));
-    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "mermaid", "pictures", "helper", "queue", "phone", "commands", "working", "model", "usage", "favicon", "panel", "keys", "suggestion", "agent-images", "update", "health", "statusline"]));
+    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "mermaid", "pictures", "helper", "queue", "phone", "commands", "working", "model", "tier", "usage", "favicon", "panel", "keys", "suggestion", "agent-images", "update", "health", "statusline"]));
     assert_eq!(v.last().unwrap()["type"], "end");
     assert_eq!(v.last().unwrap()["ok"], true);
 
@@ -93,8 +93,8 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     let own: Vec<&Value> = cmds.iter().filter(|c| c["source"] != "builtin").collect();
     assert_eq!(own, vec![&serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"})], "the user's review is hidden by the built-in /review");
     let model = cmds.iter().find(|c| c["name"] == "model").unwrap();
-    assert_eq!(model["args"][1], serde_json::json!({"value": "claude-opus-5-5", "label": "Opus 5.5"}), "full ids, with labels");
-    assert!(model["args"].as_array().unwrap().contains(&serde_json::json!({"value": "opus", "label": "The latest Opus"})));
+    assert_eq!(model["args"][1], serde_json::json!({"value": "claude-opus-5-5", "label": "Opus 5.5", "tiers": ["fast"]}), "full ids, with labels");
+    assert!(model["args"].as_array().unwrap().contains(&serde_json::json!({"value": "opus", "label": "The latest Opus", "tiers": ["fast"]})));
     let effort = cmds.iter().find(|c| c["name"] == "effort").unwrap();
     assert_eq!(effort["args"][0], serde_json::json!({"value": "low"}), "no label where the value says it all");
     assert_eq!(model["screen"], true);
@@ -152,6 +152,50 @@ fn send_refuses_when_the_agents_box_has_text() {
     fake.clear_screen("t1");
     assert_ne!(send()["result"], "box_not_empty", "no screen: it goes as before");
     assert!(fake.calls("terminal.send").len() > typed);
+}
+
+#[test]
+fn tier_uses_guarded_send_and_reports_status() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    let config = d.path().join("config.toml");
+    std::fs::write(&config, "service_tier = \"fast\"\n").unwrap();
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![
+        common::terminal("t1", &["codex"], Some(77), Some("idle"), None),
+        common::terminal("t2", &["pi"], None, Some("idle"), None),
+    ]);
+    let run = |cmd, terminal, args: &[&str]| -> Value {
+        let output = Command::new(env!("CARGO_BIN_EXE_herdr-contr-feed"))
+            .args([cmd, "--terminal", terminal]).args(args).env_clear()
+            .env("HC_SOCKET", &fake.path).env("HOME", &home).env("CODEX_HOME", d.path())
+            .output().unwrap();
+        assert!(output.status.success());
+        serde_json::from_str(String::from_utf8(output.stdout).unwrap().lines().nth(1).unwrap()).unwrap()
+    };
+    let switch = |terminal, speed| run("tier", terminal, &["--tier", speed]);
+    let status = || run("status", "t1", &[])["tags"].clone();
+    assert_eq!(run("model", "t1", &[])["tier"], "fast");
+    assert_eq!(status(), serde_json::json!([{"kind":"tier","text":"fast","warn":false}]));
+    assert_eq!(switch("t1", "fast")["result"], "unchanged");
+    assert_eq!(switch("t2", "fast")["code"], "no_tier_switch");
+    assert_eq!(switch("t1", "invalid")["code"], "usage");
+    assert!(fake.calls("terminal.send").is_empty());
+
+    fake.set_screen("t1", "• Ran ls\n\n› Draft text\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n");
+    assert_eq!(switch("t1", "ultrafast")["result"], "box_not_empty");
+    assert!(fake.calls("terminal.send").is_empty());
+    fake.clear_screen("t1");
+    assert_eq!(switch("t1", "ultrafast")["result"], "sent");
+    assert_eq!(fake.calls("terminal.send")[0]["text"], "/model --speed=ultrafast");
+    assert_eq!(fake.calls("terminal.send")[0]["terminal"], "t1");
+
+    std::fs::write(&config, "service_tier = \"ultrafast\"\n").unwrap();
+    assert_eq!(status(), serde_json::json!([{"kind":"tier","text":"ultrafast","warn":false}]));
+    for speed in ["standard", "future"] {
+        std::fs::write(&config, format!("service_tier = {speed:?}\n")).unwrap();
+        assert_eq!(status(), serde_json::json!([]));
+    }
 }
 
 #[test]

@@ -52,6 +52,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
 | `working` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; read only) | `working`, `background` |
 | `model` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; read only) | `model` |
+| `tier` | `--terminal <addr> --tier <standard\|fast\|ultrafast>` `[--cache <file>]` (Rust sidecar only) | `done` |
 | `suggestion` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; read only: an observer attach, no input) | `suggestion` |
 | `panel` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; read only) | `panel` |
 | `keys` | `--terminal <addr> --keys <json>` `[--cache <file>]` (Rust sidecar only) | `done` |
@@ -177,7 +178,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","mermaid","pictures","helper","queue","phone","commands","working","model","usage","favicon","panel","keys","suggestion","agent-images","health"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","mermaid","pictures","helper","queue","phone","commands","working","model","tier","usage","favicon","panel","keys","suggestion","agent-images","health"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -369,7 +370,7 @@ such file, or another format.
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"1.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"2.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
@@ -431,13 +432,25 @@ heights by it.
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
 | | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve` and `pictures`. |
 | | `from` (a note from another agent) | One line, "↳ docs-worker: first line", that opens to the whole note. |
-| `assistant` | `text` (markdown), `ts` | Full-width markdown. |
+| `assistant` | `text` (markdown), `ts`, optional `output_tokens`, `seconds`, `tps` | Full-width markdown. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |
 | `question` | `question`, `ts` | The question card. |
 | `status` | `text` | A centered note ("Context compacted"). |
 | `sep` | `text` ("14:05", "Yesterday 09:12", "Mon 2 Nov 18:30") | A time separator. |
 | `footer` | `text` ("01:41 · Worked 36s · 3 tools") | The turn footer, under the turn's last row. |
+
+Claude Code and Codex assistant rows can carry end-to-end output speed. `output_tokens` is the
+answer's output token count. A Claude answer groups the blocks with the same `message.id` and
+uses its usage once. A Codex answer uses `last_token_usage.output_tokens` from `token_count`,
+including reasoning tokens. For an answer with multiple assistant rows, the last one carries
+the measurements. Calls without an assistant row can still count in `status`.
+
+`seconds` is the time from the prompt, tool result or start of the task to the answer's last
+log line, including the wait for the first token. Consecutive answers without an intervening
+prompt or tool result use the previous answer's last line as the start. `tps` is
+`output_tokens / seconds`. It is omitted for fewer than 50 output tokens, less than one
+second, or missing timing. Fields with unavailable data are omitted.
 
 A note from another agent is a message that is one `<hc from="t2 docs-worker">…</hc>`, as herdr-core's `hc send`
 types it. Its `user` row has `from` (the sender as hc wrote it: the terminal, then the name when it has one; `""`
@@ -473,8 +486,15 @@ approval is the `card` command's job.
 
 | Field | Meaning |
 |---|---|
-| `source` | `statusline` (herdr-contr's status line wrapper is on), `log` (the model and the context, from the log), `none`. |
-| `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`), `text`, `percent` (context only), `warn` (context 80% or more). With an auto-compact limit and the tokens known, the context `text` is `ctx 120k / 250k`, and `percent` and `warn` are against that limit. With source `log`, the context tag comes from the log's newest assistant usage: against the limit; with no limit, `ctx 12%` of the model's context window when the model id tells it (`[1m]`: 1,000,000 tokens); else no context tag. |
+| `source` | `statusline` (herdr-contr's status line wrapper is on), `log` (tags from the session log), `none`. |
+| `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`, `speed`, `tier`), `text`, `percent` (context only), `warn` (context 80% or more). With an auto-compact limit and the tokens known, the context `text` is `ctx 120k / 250k`, and `percent` and `warn` are against that limit. With source `log`, the context tag comes from the log's newest assistant usage: against the limit; with no limit, `ctx 12%` of the model's context window when the model id tells it (`[1m]`: 1,000,000 tokens); else no context tag. |
+
+`speed` shows the median of up to five eligible answers, newest first. The helper reads the
+last 256 KiB of the log first. If that gives fewer than five measurements, it searches up to
+the last 4 MiB. Its `text` is rounded to a whole number, for example `58 tok/s`. It has
+`warn: false` and no `percent`. The tag is omitted when the search finds no answer with `tps`.
+
+A `tier` tag has text `fast` or `ultrafast` and `warn: false`. See [model](#model-model) for its sources.
 
 The auto-compact limit: `modelSettings.<model>.autoCompactWindow` for the log's model, else the top-level
 `autoCompactWindow`. The helper reads Claude Code's settings files in its order: the agent's
@@ -570,10 +590,10 @@ any other key: `failed`, nothing sent. No panel on screen: `changed`, nothing se
 ### `model` (`model`)
 
 ```json
-{"type":"model","agent":"claude","model":"claude-opus-5-5","effort":"low"}
+{"type":"model","agent":"claude","model":"claude-opus-5-5","effort":"low","tier":"fast"}
 ```
 
-- The agent's model and effort, for the sidebar's agent rows. Read only. A part that is not known is `null`.
+- The agent's model, effort and speed tier, for the sidebar's agent rows. Read only. A part that is not known is `null`.
 - `model`: the newest model that the session log names: an assistant reply's model, or a `/model` switch
   (`Set model to Opus 5.5` local command output, mapped to the id `claude-opus-5-5`), whichever is later.
 - `effort`, the first source that has it. Claude Code: herdr-contr's status line record, then the effort of a `/model` switch newer than the last reply
@@ -582,6 +602,24 @@ any other key: `failed`, nothing sent. No panel on screen: `changed`, nothing se
   `.claude/settings.local.json`, then `.claude/settings.json` in the pane's cwd, then the user's `settings.json`.
   In each file, `modelSettings.<model>.effortLevel` for the log's model, then a top-level `effortLevel`. Codex: the newest `turn_context` in the rollout, then `-c model_reasoning_effort=<level>` on the
   command line, then `model_reasoning_effort` in `config.toml`. Other agents: `null`.
+
+- `tier`: Claude Code uses `message.usage.speed` from the newest main-thread assistant message.
+  Codex uses `payload.thread_settings.service_tier` from the newest `thread_settings_applied` event.
+  If there is no event, it reads `-c service_tier=<tier>` from the agent's command line, then the top-level
+  `service_tier` in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Codex's `default` and
+  `priority` mean `standard` and `fast`. Other strings pass through. A missing value is `null`.
+
+### `tier` (`tier`)
+
+Uses the same input check and delivery as `send`. An equal tier returns `done` with `result: "unchanged"`.
+Claude Code uses `/fast on` and `/fast off` when the last reply records a different speed. Claude Code's
+`model.tier` follows the next reply. Codex uses `/model --speed=<tier>` to set the current session speed.
+`done.result: "sent"` means the command went out. The agent can still refuse the change.
+
+- `unknown_tier` means Claude Code has no known current speed.
+- `unsupported_tier` means the current model has no documented support for the requested speed, or Claude Code
+  was asked for `ultrafast`.
+- `no_tier_switch` means the agent has no speed tier switch.
 
 ### `usage` (`usage`)
 
@@ -646,6 +684,8 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     pi's picker.
   - `agy`: a table (agy reads its list from its server): its slugs, `gemini-4-argon-medium`; it also saves the
     default.
+  Model choices include `tiers` when the vendor documents accelerated speeds for that model.
+  For example, `"tiers":["fast","ultrafast"]`. Account and workspace access can affect availability.
   A value list with no hint gets the hint `<model>`. The mod finds a value by any part of its value or label.
   `screen: true`, sent bare
   it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a
@@ -661,7 +701,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
   name and runs its first match, and pi sends a part of a name to the model as a message. A full name, with or
   without an argument, runs the command in all four (spike).
 
-### `done` (`approve`, `answer`, `send`)
+### `done` (`approve`, `answer`, `send`, `tier`)
 
 ```json
 {"result":"sent","type":"done"}
@@ -670,6 +710,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 
 | `result` | Meaning | The mod |
 |---|---|---|
+| `unchanged` | `tier` found the requested speed already active. | Keeps the current selection. |
 | `sent` | The keys or the text went out. | Clears the card or the composer. |
 | `changed` | Another card, or none, is on screen now. Nothing was sent. | Reads `card` again. |
 | `unconfirmed` | herdr-core did not answer in time. The text or the key may still arrive. | Keeps the composer empty (a retry could send it twice) and says so; an approval shows as `answered`. |
@@ -677,7 +718,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 | `answered` | `approve` only: this prompt was answered less than 60 s ago (or its key may still arrive) and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `busy` | `approve` only: another press of a prompt in this terminal (another view, or a double key) was being handled at the same moment. Nothing was sent and nothing is decided. | Keeps the card and its buttons, shows `message` (press again). |
 | `opens_screen` | `send` only: the text is a screen command alone (`/model`, `/status`), and its screen would open in the terminal. Nothing was sent. `message` says what to add. | Keeps the text, shows `message`. |
-| `box_not_empty` | `send` only: the agent's own input box already has text (the text would go after it: "/" and "/status" make "//status"). Nothing was sent. `message`: "The agent's box has text in it. Clear it in the terminal first. Nothing was sent." | Keeps the text, shows `message`. |
+| `box_not_empty` | `send` and `tier`: the agent's own input box already has text (the text would go after it: "/" and "/status" make "//status"). Nothing was sent. `message`: "The agent's box has text in it. Clear it in the terminal first. Nothing was sent." | Keeps the text, shows `message`. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
 
 `send` reads the screen right before it types. Where it finds the agent's input box and the box has text, it sends

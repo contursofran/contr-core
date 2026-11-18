@@ -159,6 +159,34 @@ pub fn context_used(lines: &[String]) -> Option<i64> {
     None
 }
 
+/// The newest speed record, with a separate result for a record with no tier.
+pub fn tier(path: &Path, kind: &str) -> Option<Option<String>> {
+    let (marker, record_type) = match kind {
+        "claude" => ("assistant", "assistant"),
+        "codex" => ("thread_settings_applied", "event_msg"),
+        _ => return None,
+    };
+    // Start after the last complete line. Codex may log settings only at session start.
+    let mut before = line_start(path, size_of(path).ok()?).ok()?;
+    while before > 0 {
+        let range = read_before(path, before, 256 * 1024).ok()?;
+        for line in range.lines.iter().rev().filter(|line| line.contains(marker)) {
+            let Ok(row) = serde_json::from_str::<Value>(line) else { continue };
+            if row["type"] != record_type {
+                continue;
+            }
+            let value = match kind {
+                "claude" if row["isSidechain"] != true => &row["message"]["usage"]["speed"],
+                "codex" if row["payload"]["type"] == marker => &row["payload"]["thread_settings"]["service_tier"],
+                _ => continue,
+            };
+            return Some(value.as_str().map(String::from));
+        }
+        before = range.start;
+    }
+    None
+}
+
 /// The model of the newest line that names one, for logs with no status line: an assistant line's
 /// `message.model`, a Codex `payload.model`, or a `/model` switch (`Set model to …` local command output, the label
 /// mapped back to its id; `Default` names no model and is skipped).
