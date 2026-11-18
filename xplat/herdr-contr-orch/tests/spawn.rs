@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use common::{call, path, Fake};
-use orch::spawn::{review_worktree, CLEAN_SCRIPT, CODEX_ENV, SETUP_WRAPPER};
+use orch::spawn::{agent_argv, review_worktree, CLEAN_SCRIPT, CODEX_ENV, SETUP_WRAPPER};
 use orch::tools::REPORT_TOOL;
 use orch::workers::program;
 use serde_json::{json, Value};
@@ -228,7 +228,10 @@ fn a_codex_profile_gets_the_report_tool_and_the_instructions_of_its_agent() {
             "builder": {"argv": ["/opt/codex", "-m", "sol"]},
             "sol": {"argv": ["codex"], "agent": "planner"},
             "reviewer": {"argv": ["codex"]},
-            "own": {"argv": ["codex", "-c", "mcp_servers.contr.command=\"mine\""], "agent": "none"}}}),
+            "own": {"argv": ["codex",
+                "-c", "mcp_servers.contr.command=\"mine\"",
+                "--config", "mcp_servers.contr.args=[\"mcp\",\"mine\"]",
+                "-c", "mcp_servers.contr.env_vars=[\"MY_VAR\"]"], "agent": "none"}}}),
     );
     let run = |vars: &[(&str, &str)], profile: &str, task: &[&str]| {
         let core = run_reply("w");
@@ -259,15 +262,37 @@ fn a_codex_profile_gets_the_report_tool_and_the_instructions_of_its_agent() {
     // A definition with no front matter is the instructions whole. No task: no instructions.
     assert_eq!(program(&run(&vars, "sol", &["go"]).0).last().unwrap(), "No front matter.\n\nYour task:\n\ngo");
     assert_eq!(program(&run(&vars, "sol", &[]).0).last().unwrap(), server[4].as_str());
-    // A definition with no text, or no definition, gives the task alone. An MCP server of the profile stays.
+    // A definition with no text, or no definition, gives the task alone.
     assert_eq!(program(&run(&vars, "reviewer", &["go"]).0).last().unwrap(), "go");
-    assert_eq!(program(&run(&vars, "own", &["go"]).0), ["codex", "-c", "mcp_servers.contr.command=\"mine\"", "go"]);
+    assert_eq!(program(&run(&vars, "own", &["go"]).0), [
+        "codex", "-c", &server[3], "-c", &server[4],
+        "-c", "mcp_servers.contr.command=\"mine\"",
+        "--config", "mcp_servers.contr.args=[\"mcp\",\"mine\"]",
+        "-c", "mcp_servers.contr.env_vars=[\"MY_VAR\"]", "go",
+    ]);
     // With no kit, the command and the task are as the profile has them. Without the installed tool, the
     // server's command is the program that runs.
     assert_eq!(program(&run(&[("CONTR_AGENTS_CONFIG", &cfg)], "builder", &["go"]).0), ["/opt/codex", "-m", "sol", "go"]);
     fs::remove_file(&orch).unwrap();
     let exe = program(&run(&vars, "builder", &["go"]).0)[2].clone();
     assert!(exe.starts_with("mcp_servers.contr.command=\"/") && !exe.contains(path(&orch)), "{exe}");
+}
+
+#[test]
+fn a_codex_profile_keeps_its_report_approval_mode() {
+    let argv = [
+        "codex",
+        "--config", "mcp_servers.contr.tools.report.approval_mode=\"prompt\"",
+        "-c", "mcp_servers.contr.args_extra=[]",
+        "-c", "mcp_servers.contr.env_vars=[]",
+        "mcp_servers.contr.enabled_tools=[]",
+    ].map(String::from);
+    let args = agent_argv("/kit", "builder", &argv);
+    assert_eq!(args.len(), argv.len() + 6);
+    assert_eq!(args[0], argv[0]);
+    assert!(args[2].starts_with("mcp_servers.contr.command="));
+    assert_eq!(args[3..7], ["-c", "mcp_servers.contr.args=[\"mcp\"]", "-c", "mcp_servers.contr.enabled_tools=[\"report\"]"]);
+    assert_eq!(args[7..], argv[1..]);
 }
 
 #[test]

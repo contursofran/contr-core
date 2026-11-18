@@ -133,14 +133,19 @@ pub fn flag_value(argv: &[String], flag: &str) -> String {
 /// The value of Codex's configuration key `key` in argv: the text after `key=` in the argument after `-c` or
 /// `--config`, less its quotes; or "".
 pub fn codex_config(argv: &[String], key: &str) -> String {
+    codex_config_value(argv, key).unwrap_or_default().trim_matches('"').to_string()
+}
+
+/// The raw value of a Codex configuration key, including an empty assignment.
+pub(crate) fn codex_config_value<'a>(argv: &'a [String], key: &str) -> Option<&'a str> {
     for pair in argv.windows(2) {
         if pair[0] == "-c" || pair[0] == "--config" {
             if let Some(v) = pair[1].strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
-                return v.trim_matches('"').to_string();
+                return Some(v);
             }
         }
     }
-    String::new()
+    None
 }
 
 /// The model that argv starts: the value of --model, or of codex's -m; or "".
