@@ -206,7 +206,7 @@ fn status_tags() {
         "sess-1",
     );
     let mut o6 = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o6, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o6, SystemTime::now());
     let st = &o6.lines[0];
     assert!(
         st.contains(r#""source":"statusline""#) && st.contains(r#""text":"Opus 9""#) && st.contains(r#""text":"ctx 84%""#) && st.contains(r#""warn":true"#),
@@ -222,21 +222,21 @@ fn status_tags() {
         "sess-1",
     );
     let mut o8 = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o8, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o8, SystemTime::now());
     assert!(o8.lines[0].contains(r#""text":"ctx 120k / 250k""#) && o8.lines[0].contains(r#""percent":48"#) && o8.lines[0].contains(r#""warn":false"#), "modfeed status: ctx against the limit ({})", o8.lines[0]);
     StatusLineFolder::new(&sdir).save(br#"{"session_id":"sess-1","context_window":{"context_window_size":1000000,"used_percentage":21}}"#, b"", "sess-1");
     let mut o9 = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o9, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o9, SystemTime::now());
     assert!(o9.lines[0].contains(r#""text":"ctx 210k / 250k""#) && o9.lines[0].contains(r#""warn":true"#), "modfeed status: near the limit warns ({})", o9.lines[0]);
     StatusLineFolder::new(&sdir).save(br#"{"session_id":"sess-1","context_window":{"used_percentage":21}}"#, b"", "sess-1");
     let mut o10 = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o10, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o10, SystemTime::now());
     assert!(o10.lines[0].contains(r#""text":"ctx 21%""#), "modfeed status: tokens not known, percent as before ({})", o10.lines[0]);
     std::fs::write(&settings, "{}").unwrap();
     assert_eq!(status::compact_limit(&[settings.clone()], None), None, "modfeed status: no autoCompactWindow");
     assert_eq!(status::compact_limit(&[dir.path().join("missing.json")], None), None, "modfeed status: no settings file");
     let mut o7 = JsonLines::new();
-    status::run("codex", Some(&log), &settings, None, &mut o7, SystemTime::now());
+    status::run("codex", Some(&log), &settings, None, None, &mut o7, SystemTime::now());
     assert!(o7.lines[0].contains(r#""source":"log""#) && o7.lines[0].contains("claude-test-1"), "modfeed status: model from the log otherwise");
 }
 
@@ -261,16 +261,16 @@ fn status_ctx_from_log() {
     assert_eq!(tail::context_used(&lines), Some(120_003), "modfeed tail: newest main-thread usage");
     assert_eq!(tail::context_used(&turn()), None, "modfeed tail: no usage");
     let mut o = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o, SystemTime::now());
     let st = &o.lines[0];
     assert!(st.contains(r#""source":"log""#) && st.contains(r#""text":"claude-test-1""#) && st.contains(r#""text":"ctx 120k / 250k""#) && st.contains(r#""percent":48"#), "modfeed status: ctx from the log ({st})");
     std::fs::write(&settings, "{}").unwrap();
     let mut o2 = JsonLines::new();
-    status::run("claude", Some(&log), &settings, None, &mut o2, SystemTime::now());
+    status::run("claude", Some(&log), &settings, None, None, &mut o2, SystemTime::now());
     assert!(!o2.lines[0].contains("ctx"), "modfeed status: no limit, no window, no ctx tag ({})", o2.lines[0]);
     std::fs::write(&settings, r#"{"autoCompactWindow":250000}"#).unwrap();
     let mut o3 = JsonLines::new();
-    status::run("codex", Some(&log), &settings, None, &mut o3, SystemTime::now());
+    status::run("codex", Some(&log), &settings, None, None, &mut o3, SystemTime::now());
     assert!(!o3.lines[0].contains("ctx"), "modfeed status: ctx from the log for claude only ({})", o3.lines[0]);
 }
 
@@ -288,7 +288,7 @@ fn usage_log(path: &std::path::Path, model: &str) {
 
 fn ctx_text(log: &std::path::Path, settings: &std::path::Path, cwd: Option<&std::path::Path>) -> String {
     let mut o = JsonLines::new();
-    status::run("claude", Some(log), settings, cwd, &mut o, SystemTime::now());
+    status::run("claude", Some(log), settings, cwd, None, &mut o, SystemTime::now());
     let v: serde_json::Value = serde_json::from_str(&o.lines[0]).unwrap();
     v["tags"].as_array().unwrap().iter().find(|t| t["kind"] == "context").map(|t| t["text"].as_str().unwrap().to_string()).unwrap_or_default()
 }
@@ -422,7 +422,7 @@ const SPEED_CODEX: &str = include_str!("../../fixtures/output-speed-codex.jsonl"
 
 fn speed_tag(agent: &str, path: &std::path::Path) -> Option<serde_json::Value> {
     let mut out = JsonLines::new();
-    status::run(agent, Some(path), &path.with_extension("settings.json"), None, &mut out, SystemTime::now());
+    status::run(agent, Some(path), &path.with_extension("settings.json"), None, None, &mut out, SystemTime::now());
     let line: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
     line["tags"].as_array().unwrap().iter().find(|t| t["kind"] == "speed").cloned()
 }
@@ -481,6 +481,19 @@ fn codex_output_speed_counts_tool_only_answers_in_status() {
     assert_eq!(replies[0]["seconds"], 2.0);
     assert_eq!(replies[0]["tps"], 50.0);
     assert_eq!(speed_tag("codex", &path).unwrap(), serde_json::json!({"kind":"speed","text":"53 tok/s","warn":false}));
+}
+
+#[test]
+fn status_reports_speed_and_tier_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    std::fs::write(&path, SPEED_CODEX).unwrap();
+    let mut out = JsonLines::new();
+    status::run("codex", Some(&path), &path.with_extension("settings.json"), None, Some("ultrafast".into()), &mut out, SystemTime::now());
+    let line: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+    let tags = line["tags"].as_array().unwrap();
+    assert!(tags.contains(&serde_json::json!({"kind":"speed","text":"53 tok/s","warn":false})));
+    assert!(tags.contains(&serde_json::json!({"kind":"tier","text":"ultrafast","warn":false})));
 }
 
 #[test]

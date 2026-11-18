@@ -9,7 +9,8 @@
 //!   herdr-contr-feed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //!   herdr-contr-feed queue  --terminal <addr> [--cache <file>]   (the agent's own queue: one `queued` line; read only)
 //!   herdr-contr-feed working --terminal <addr> [--cache <file>]   (the agent's working and background lines on screen; read only)
-//!   herdr-contr-feed model  --terminal <addr> [--cache <file>]   (the agent's model and effort; read only)
+//!   herdr-contr-feed tier --terminal <addr> --tier <standard|fast|ultrafast> [--cache <file>]
+//!   herdr-contr-feed model  --terminal <addr> [--cache <file>]   (the agent's model, effort and speed; read only)
 //!   herdr-contr-feed health   (checks the install; read only)
 //!   herdr-contr-feed usage   (the Claude and Codex plan usage; read only)
 //!   herdr-contr-feed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
@@ -73,7 +74,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "build": crate::protocol::BUILD, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "mermaid", "pictures", "helper", "queue", "phone", "commands", "working", "model", "usage", "favicon", "panel", "keys", "suggestion", "agent-images", "update", "health", "statusline"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "mermaid", "pictures", "helper", "queue", "phone", "commands", "working", "model", "tier", "usage", "favicon", "panel", "keys", "suggestion", "agent-images", "update", "health", "statusline"], "release": update::release()}));
             r.finish(true)
         }
         "health" => {
@@ -282,8 +283,12 @@ pub fn run(argv: &[String]) -> String {
                 Err((code, message)) => r.fail(code, &message),
             }
         }
-        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" | "working" | "model" | "panel" | "keys" | "suggestion" => {
+        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" | "working" | "model" | "tier" | "panel" | "keys" | "suggestion" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
+            let target = opt("--tier").filter(|t| matches!(t.as_str(), "standard" | "fast" | "ultrafast"));
+            if cmd == "tier" && target.is_none() {
+                return r.fail("usage", "tier needs --tier <standard|fast|ultrafast>");
+            }
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
             // Another machine, and the person chose Never: nothing runs there, not even a look.
@@ -307,7 +312,7 @@ pub fn run(argv: &[String]) -> String {
                 Ok(None) => {}
             }
             // A send looks the log up again: the chat's log may be a conversation the agent left (`/clear`).
-            let (found, was, client) = match find(&terminal, cache_url, cmd == "send") {
+            let (found, was, client) = match find(&terminal, cache_url, matches!(cmd.as_str(), "send" | "tier")) {
                 Ok(x) => x,
                 Err((code, message)) => return r.fail(code, &message),
             };
@@ -328,7 +333,8 @@ pub fn run(argv: &[String]) -> String {
                 "status" => {
                     let env = herdr_core::hc::session::process_env();
                     let cwd = Some(Path::new(&found.pane.cwd)).filter(|c| !c.as_os_str().is_empty());
-                    status::run(&kind, log, &status::default_settings(&env), cwd, &mut r.out, SystemTime::now());
+                    let tier = agentmodel::tier(&kind, log, &codex_config(&env), || agentmodel::tier_in_args(&pane_procs(&found.pane)));
+                    status::run(&kind, log, &status::default_settings(&env), cwd, tier, &mut r.out, SystemTime::now());
                     return r.finish(true);
                 }
                 "queue" => {
@@ -369,12 +375,21 @@ pub fn run(argv: &[String]) -> String {
                 }
                 "model" => {
                     let env = herdr_core::hc::session::process_env();
-                    let home = herdr_core::hc::session::home_dir(&env);
-                    let codex = env.get("CODEX_HOME").filter(|d| !d.is_empty()).cloned().unwrap_or_else(|| home + "/.codex");
-                    // The process list only when the faster sources cannot answer it.
-                    let procs = if found.pane.process_ids.is_empty() { vec![] } else { agentmodel::pane_procs(&herdr_core::resolver::processes(), &found.pane.process_ids) };
-                    let s = agentmodel::Sources { log, claude_settings: &status::default_settings(&env), cwd: Some(Path::new(&found.pane.cwd)).filter(|c| !c.as_os_str().is_empty()), codex_config: &PathBuf::from(codex + "/config.toml"), procs: &procs };
+                    let procs = pane_procs(&found.pane);
+                    let s = agentmodel::Sources { log, claude_settings: &status::default_settings(&env), cwd: Some(Path::new(&found.pane.cwd)).filter(|c| !c.as_os_str().is_empty()), codex_config: &codex_config(&env), procs: &procs };
                     r.out.emit_value(agentmodel::line(&kind, &agentmodel::read(&kind, &s, SystemTime::now())));
+                    return r.finish(true);
+                }
+                "tier" => {
+                    let env = herdr_core::hc::session::process_env();
+                    let current = agentmodel::tier(&kind, log, &codex_config(&env), || agentmodel::tier_in_args(&pane_procs(&found.pane)));
+                    let model = log.and_then(|path| crate::tail::read(path, None, 256 * 1024).ok()).and_then(|range| crate::tail::model(&range.lines));
+                    let d = match agentmodel::tier_command(&kind, model.as_deref(), current.as_deref(), target.as_deref().unwrap()) {
+                        Ok(Some(text)) => cards::send(&found.pane, &client, text, &[], log, Some(&kind), None, was.as_ref()),
+                        Ok(None) => cards::Done::new("unchanged", None),
+                        Err((code, message)) => return r.fail(code, message),
+                    };
+                    r.out.emit(&d);
                     return r.finish(true);
                 }
                 "panel" => {
@@ -451,8 +466,21 @@ pub fn run(argv: &[String]) -> String {
             }
         }
         // The Swift sidecar's text (parity): `queue` is serve's own, not offered to the mod.
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, working, model, panel, keys"),
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, working, model, tier, panel, keys"),
     }
+}
+
+fn codex_config(env: &std::collections::HashMap<String, String>) -> PathBuf {
+    let dir = env.get("CODEX_HOME").filter(|d| !d.is_empty()).cloned()
+        .unwrap_or_else(|| herdr_core::hc::session::home_dir(env) + "/.codex");
+    PathBuf::from(dir).join("config.toml")
+}
+
+fn pane_procs(pane: &herdr_core::Pane) -> Vec<herdr_core::resolver::Proc> {
+    if pane.process_ids.is_empty() {
+        return vec![];
+    }
+    agentmodel::pane_procs(&herdr_core::resolver::processes(), &pane.process_ids)
 }
 
 /// herdr-core's client and the agent in `terminal` (with its session log), or the error line's code and message.

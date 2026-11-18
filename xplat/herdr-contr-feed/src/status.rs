@@ -13,7 +13,7 @@ use std::time::SystemTime;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Tag {
-    /// "model", "effort", "context", "cost", "own", "speed".
+    /// "model", "effort", "context", "cost", "own", "speed", "tier".
     pub kind: String,
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,7 +147,7 @@ struct Line<'a> {
 
 /// Prints one `status` line. `log`: the session log (its file name is Claude Code's session id). `settings`: the
 /// user's Claude Code settings; `cwd`: the agent's folder, for the project's settings.
-pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>, out: &mut JsonLines, now: SystemTime) {
+pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>, tier: Option<String>, out: &mut JsonLines, now: SystemTime) {
     let (mut tags, mut source): (Vec<Tag>, &str) = (vec![], "none");
     let range = log.and_then(|l| tail::read(l, None, 256 * 1024).ok());
     let lines = range.as_ref().map(|r| r.lines.as_slice());
@@ -191,6 +191,9 @@ pub fn run(agent: &str, log: Option<&Path>, settings: &Path, cwd: Option<&Path>,
                 source = "log";
             }
         }
+    }
+    if let Some(text) = tier.filter(|t| matches!(t.as_str(), "fast" | "ultrafast")) {
+        tags.push(Tag { kind: "tier".into(), text, percent: None, warn: false });
     }
     out.emit(&Line { t: "status", agent, source, tags });
 }
