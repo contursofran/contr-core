@@ -153,7 +153,7 @@ fn orch_program(kit: &str) -> String {
 /// The arguments that give a Codex worker the kit's `report` tool: the MCP server of this tool, with the
 /// environment that it reads, only the `report` tool, and no question before a report. A value is TOML; a
 /// JSON string or list of strings is the same text.
-fn codex_report(kit: &str) -> Vec<String> {
+fn codex_report(kit: &str, args: &[String]) -> Vec<String> {
     let text = |v: Value| v.to_string();
     [
         format!("{CODEX_SERVER}.command={}", text(json!(orch_program(kit)))),
@@ -163,6 +163,10 @@ fn codex_report(kit: &str) -> Vec<String> {
         format!("{CODEX_SERVER}.tools.report.approval_mode={}", text(json!("approve"))),
     ]
     .into_iter()
+    .filter(|pair| {
+        let (key, _) = pair.split_once('=').expect("report config assignment");
+        workers::codex_config_value(args, key).is_none()
+    })
     .flat_map(|pair| ["-c".to_string(), pair])
     .collect()
 }
@@ -177,11 +181,11 @@ fn role_text(kit: &str, agent: &str) -> Option<String> {
 /// The profile's command. With a kit, a claude command gets `--allowedTools <the report tool> --plugin-dir <kit>`
 /// after the program name, unless it has `--plugin-dir` already: the allow rule lets a worker report in auto
 /// mode. `--allowedTools` takes a list, so a flag comes after it. When its agent has a definition in the kit,
-/// it also gets `--agent contr:<agent>`. With a kit, a codex command gets the kit's `report` tool
-/// (`codex_report`) after the program name, unless it sets that MCP server already.
+/// it also gets `--agent contr:<agent>`. With a kit, each missing Codex `report` setting goes
+/// after the program name.
 pub fn agent_argv(kit: &str, agent: &str, argv: &[String]) -> Vec<String> {
-    if is_codex(argv) && !kit.is_empty() && !argv.iter().any(|a| a.starts_with(CODEX_SERVER)) {
-        return [vec![argv[0].clone()], codex_report(kit), argv[1..].to_vec()].concat();
+    if is_codex(argv) && !kit.is_empty() {
+        return [vec![argv[0].clone()], codex_report(kit, &argv[1..]), argv[1..].to_vec()].concat();
     }
     if !is_claude(argv) || kit.is_empty() {
         return argv.to_vec();

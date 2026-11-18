@@ -70,10 +70,10 @@ Use `--file <hooks.json>` to select a different file.
    `claude --plugin-dir <kit> …`, unless its argv has `--plugin-dir`
    already. A profile with an agent file here also starts as that
    agent: `claude --plugin-dir <kit> --agent contr:<profile> …`.
-   A codex profile has no plugin. It starts with the `report` tool of this
-   tool's MCP server (`codex -c mcp_servers.contr.… `), unless its argv sets
-   `mcp_servers.contr` already, and the text of its agent file comes before
-   its task. `agents set` changes its `--model` and its
+   A codex profile has no plugin. The kit adds each missing
+   `mcp_servers.contr` key for the `report` tool and keeps the keys set by
+   the profile's `-c` or `--config` arguments. The text of its agent file
+   comes before its task. `agents set` changes its `--model` and its
    `-c model_reasoning_effort=`. See Codex question hook above.
    `agents resume` is for Claude Code.
    A variant names
