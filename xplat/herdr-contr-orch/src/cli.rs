@@ -64,6 +64,7 @@ pub const AGENTS_USAGE: &str = "Usage:
   herdr-contr-orch agents config --json            print the profiles file as JSON: path, bad, flow
                                                    (values in effect), fields (default and valid
                                                    values), roles (argv, claude, model, effort)
+  herdr-contr-orch agents config --check           check the profiles and flow used by spawn
   herdr-contr-orch agents set <key> <value> [<key> <value>…]
                                                    change fields of the profiles file under its
                                                    lock; keys: flow.<key>, profile.<role>.model,
@@ -432,6 +433,23 @@ fn spawn_worker(flags: &Flags, pos: &[String], cfg: &Config, env: &dyn Fn(&str) 
 fn run_settings(sub: &str, rest: &[String], env: &dyn Fn(&str) -> String, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let path = config_path(env);
     let done = if sub == "config" {
+        if rest == ["--check"] {
+            let checked = Config::load(&path).and_then(|cfg| {
+                if !cfg.notice.is_empty() {
+                    return Err(cfg.notice);
+                }
+                for (_, profile) in cfg.flow.profiles.roles() {
+                    if !cfg.profiles.contains_key(&profile) {
+                        return Err(cfg.no_profile(&profile));
+                    }
+                }
+                writeln!(out, "{} profiles, flow read.", cfg.profiles.len()).map_err(|e| e.to_string())
+            });
+            return match checked {
+                Ok(()) => 0,
+                Err(e) => { let _ = writeln!(err, "{e}"); 1 }
+            };
+        }
         if rest != ["--json"] {
             let _ = write!(err, "herdr-contr-orch agents config: give --json\n{AGENTS_USAGE}");
             return 2;

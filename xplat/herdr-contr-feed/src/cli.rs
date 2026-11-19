@@ -11,7 +11,7 @@
 //!   herdr-contr-feed working --terminal <addr> [--cache <file>]   (the agent's working and background lines on screen; read only)
 //!   herdr-contr-feed tier --terminal <addr> --tier <standard|fast|ultrafast> [--cache <file>]
 //!   herdr-contr-feed model  --terminal <addr> [--cache <file>]   (the agent's model, effort and speed; read only)
-//!   herdr-contr-feed health   (checks the install; read only)
+//!   herdr-contr-feed health [--machine <m>]   (checks the install; read only)
 //!   herdr-contr-feed usage   (the Claude and Codex plan usage; read only)
 //!   herdr-contr-feed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   herdr-contr-feed agent-images --log <log> --dir <folder> --srcs <json>   (copies of the images an agent links)
@@ -79,15 +79,23 @@ pub fn run(argv: &[String]) -> String {
         }
         "health" => {
             let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-            // orch and kit: the backend root.
             let Some(root) = config::dir(home().as_deref()) else { return r.fail("usage", "health needs --home <herdr-app home>") };
+            if has("--machine") {
+                let Some(machine) = opt("--machine").filter(|m| !m.is_empty() && !m.starts_with('-')) else {
+                    return r.fail("usage", "health --machine needs a machine name");
+                };
+                if config::load(Some(&root)).remote_never {
+                    return r.fail("remote-off", config::REMOTE_OFF);
+                }
+                return remote::health_on(&HcClient::new(HcSession::resolve_env(), 4, 4), &machine);
+            }
             let i = health::Inputs {
                 root,
                 build: crate::protocol::BUILD.into(),
                 claude: health::claude_dir(&env),
                 orch_version: &health::run_orch_version,
             };
-            for c in health::checks(&i) {
+            for c in health::machine_checks(&i, &env, has("--remote")) {
                 r.out.emit_value(c.line());
             }
             r.finish(true)

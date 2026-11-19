@@ -347,6 +347,37 @@ fn missing(machine: &str) -> Fail {
     fail("remote_helper_missing", format!("{machine} has no herdr-contr helper yet, so the chat cannot read its agents."))
 }
 
+/// Run the installed core's health check, or the remote chat helper's, with no install or cache.
+pub fn health_on(client: &HcClient, machine: &str) -> String {
+    let script = r#"
+if [ -n "$CONTR_HOME" ]; then
+    root=$CONTR_HOME
+elif [ -n "$HERDR_APP_HOME" ]; then
+    root=$HERDR_APP_HOME/herdr-contr
+else
+    root=$HOME/.config/contr-core
+    if [ ! -d "$root" ]; then
+        for old in contr-backend herdr-app/herdr-contr; do
+            if [ -d "$HOME/.config/$old" ]; then root=$HOME/.config/$old; break; fi
+        done
+    fi
+fi
+for helper in "$root/bin/herdr-contr-feed" "$HOME/$1"; do
+    if [ -x "$helper" ]; then CONTR_HOME=$root exec "$helper" health --remote; fi
+done
+if command -v herdr-contr-feed >/dev/null 2>&1; then exec herdr-contr-feed health --remote; fi
+exit 127
+"#;
+    let args = ["sh".to_owned(), "-c".into(), script.into(), "sh".into(), helper_rel()];
+    let result = match exec(client, machine, Run::Argv(&args)) {
+        Ok(ran) if ran.no_program || ran.code == Some(127) => Err(missing(machine)),
+        Ok(ran) if ran.code == Some(0) && !ran.stdout.is_empty() => Ok(String::from_utf8_lossy(&ran.stdout).into_owned()),
+        Ok(_) => Err(fail("remote_failed", format!("The helper on {machine} did not report its health."))),
+        Err(e) => Err(e),
+    };
+    result.unwrap_or_else(|e| error_lines("health", e, json!({})))
+}
+
 /// `cmd` with `args` (as given to this helper) for the terminal `terminal` on `machine`: the lines of the helper
 /// there, as they are. `cache`: this computer's chat cache (what is remembered about machines goes beside it).
 pub fn forward(client: &HcClient, cmd: &str, args: &[String], machine: &str, terminal: &str, cache: Option<&Path>) -> String {
