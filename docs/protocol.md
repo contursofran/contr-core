@@ -61,7 +61,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `pictures` | `--path <log> --dir <folder> --pics <json>` (Rust sidecar only) | `picture` for each entry of `--pics` |
 | `favicon` | `--path <file> --dir <folder>` (Rust sidecar only) | `favicon` |
 | `agent-images` | `--log <log> --dir <folder> --srcs <json>` (Rust sidecar only) | `agent-image` for each entry of `--srcs` |
-| `health` | — (Rust sidecar only) | `check` for each check |
+| `health` | `[--machine <m>]` (Rust sidecar only) | `check` for each check |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
@@ -346,14 +346,23 @@ asked for in 7 days are removed from the folder; other files never. Errors: `usa
 {"fix":"Install again: unzip the latest release and run ./install.sh.","id":"orch","message":"herdr-contr-orch is from build 1a2b3c4 2026-11-01, the helper is from build 5d6e7f8 2026-11-16.","state":"fail","type":"check"}
 ```
 
-The checks of the install in `--home`, in this order (#217). It writes nothing. `state`: `ok`, `warn` or
-`fail`; `fix` is empty for `ok`. The checks `orch` and `kit` read the core's root (`--home`'s `herdr-contr`,
-else `CONTR_HOME`, as the other commands).
+The checks read the core's root and the current user's setup. `state` is `ok`, `warn` or `fail`.
+`fix` is empty for `ok`. `--machine` runs the helper on the named hc machine and returns its lines.
+A machine can run the remote chat helper with no orchestration install. In that case the orchestration and
+missing kit checks are warnings. Errors include `remote_failed`, `remote_helper_missing` and `remote-off`.
+The command writes nothing and installs nothing.
 
 | `id` | Checks |
 |---|---|
+| `helper`, `root`, `hc` | helper build and protocol, the core folder, and whether the hc socket answers |
 | `orch` | `bin/herdr-contr-orch --version` in the core's root runs and gives the helper's build |
-| `kit` | the kit is in `kit/` of the core's root, and Claude Code's marketplace `contr` (`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/known_marketplaces.json`) is the core's root |
+| `kit` | the kit exists and the Claude Code marketplace points to the core's root, including by a link |
+| `agents` | the profiles file passes `herdr-contr-orch agents config --check`, or built-in defaults apply |
+| `codex` | Codex is on PATH and the coordinator hooks are present in its user hook file |
+| `logs` | at least one Claude Code or Codex session folder exists |
+| `usage` | a saved plan usage record is readable. The check does not start an agent |
+| `git`, `gh` | Git is on PATH and the GitHub CLI can verify sign-in |
+| `release` | the helper has a configured GitHub release source |
 
 ### `favicon` (`favicon --path <file> --dir <folder>`)
 

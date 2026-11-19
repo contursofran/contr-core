@@ -1,6 +1,20 @@
 //! `agents config --json`, `agents set` and `owner open --json` on files in a temporary folder.
 mod common;
 
+#[test]
+fn profiles_check_uses_the_spawn_parser() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agents.json");
+    let env = [("CONTR_AGENTS_CONFIG", common::path(&path))];
+    let check = || common::call(&["agents", "config", "--check"], &env, &common::Fake::default());
+    std::fs::write(&path, "{}").unwrap();
+    assert!(check().out.contains("profiles, flow read"));
+    for data in [r#"{"flow":{"workers":0}}"#, r#"{"flow":{"profiles":{"builder":"missing"}}}"#, r#"{"profiles":{"custom":{"argv":[]}}}"#] {
+        std::fs::write(&path, data).unwrap();
+        assert_eq!(check().code, 1, "{data}");
+    }
+}
+
 use std::fs;
 use std::path::Path;
 

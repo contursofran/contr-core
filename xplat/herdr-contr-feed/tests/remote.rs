@@ -125,6 +125,22 @@ fn a_terminal_on_another_machine_runs_the_helper_there() {
 }
 
 #[test]
+fn health_reads_the_remote_core_and_does_not_install_a_missing_helper() {
+    let w = world();
+    assert_eq!(w.error(&["health", "--machine", "box"])["code"], "remote_helper_missing");
+    assert!(!w.installed().exists());
+    w.install_by_hand();
+    let report = w.run(&["health", "--machine", "box"]);
+    let row = |id: &str| report.iter().find(|v| v["id"] == id).unwrap();
+    assert_eq!(row("hc")["state"], "ok");
+    assert_eq!(row("hc")["message"], "Core answers · 1 terminals");
+    assert_eq!(row("orch")["state"], "warn");
+    assert_eq!(report.last().unwrap()["ok"], true);
+    assert_eq!(w.here.calls("machine.exec").len(), 2);
+    assert!(w.there.calls("terminal.send").is_empty());
+}
+
+#[test]
 fn no_helper_there_gives_what_the_card_shows() {
     let w = world();
     let e = w.error(&["card", "--terminal", "box/t3"]);
