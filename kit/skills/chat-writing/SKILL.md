@@ -83,11 +83,15 @@ b-649 | #649 | Rows and badge
 b-665 | #665 | Fewer lines
 ```
 
-For a merge order, a `contr-queue` block, one line `#<n> <label>` for each step in order, with ` -- <note>` for a dependency:
+For a merge order, write a `contr-queue` block with one `#<n> <label>` line for each step.
+Add ` -- <note>` for a dependency. When the note names an owner item, end the line with
+` | owner: D7` for a question or ` | owner: T3` for a to-do. Contr shows the item as a chip
+while it is open in this chat.
 
 ```contr-queue
 #656 Rows and badge
 #665 Fewer lines -- waits for #656
+#670 Queue block -- waits for your answer | owner: D7
 ```
 
 ## Diagrams
